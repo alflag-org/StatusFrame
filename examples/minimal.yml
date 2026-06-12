@@ -1,0 +1,42 @@
+site:
+  name: Example Status
+  description: Simple public status page
+  timezone: Asia/Tokyo
+
+features:
+  monitoring:
+    enabled: false
+  incidents:
+    enabled: false
+  maintenance:
+    enabled: false
+  notifications:
+    enabled: false
+  metrics:
+    enabled: false
+  admin_api:
+    enabled: false
+  storage:
+    enabled: false
+
+status_states:
+  - id: operational
+    label: Operational
+    severity: 0
+  - id: degraded
+    label: Degraded
+    severity: 1
+  - id: offline
+    label: Offline
+    severity: 2
+  - id: unknown
+    label: Unknown
+    severity: 1
+
+components:
+  - id: web
+    name: Web services
+    status: operational
+  - id: game
+    name: Game services
+    status: operational

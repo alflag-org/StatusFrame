@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "WebWorker"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "types": ["@cloudflare/workers-types", "node", "vitest/globals"],
+    "baseUrl": ".",
+    "paths": {
+      "@statusframe/core": ["packages/core/src/index.ts"],
+      "@statusframe/schema": ["packages/schema/src/index.ts"],
+      "@statusframe/storage-static": ["packages/storage/static/src/index.ts"],
+      "@statusframe/storage-memory": ["packages/storage/memory/src/index.ts"],
+      "@statusframe/storage-d1": ["packages/storage/d1/src/index.ts"],
+      "@statusframe/monitor-http": ["packages/extensions/monitor-http/src/index.ts"],
+      "@statusframe/monitor-tcp": ["packages/extensions/monitor-tcp/src/index.ts"],
+      "@statusframe/monitor-dns": ["packages/extensions/monitor-dns/src/index.ts"],
+      "@statusframe/monitor-tls": ["packages/extensions/monitor-tls/src/index.ts"],
+      "@statusframe/incidents": ["packages/extensions/incidents/src/index.ts"],
+      "@statusframe/maintenance": ["packages/extensions/maintenance/src/index.ts"],
+      "@statusframe/metrics": ["packages/extensions/metrics/src/index.ts"],
+      "@statusframe/notifications-webhook": ["packages/extensions/notifications-webhook/src/index.ts"],
+      "@statusframe/admin-api": ["packages/extensions/admin-api/src/index.ts"]
+    }
+  },
+  "include": ["apps/**/*.ts", "packages/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
+}

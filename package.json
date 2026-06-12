@@ -1,0 +1,27 @@
+{
+  "name": "statusframe",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.5.3",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "dev": "pnpm --filter @statusframe/worker dev",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "validate": "pnpm typecheck && pnpm test"
+  },
+  "dependencies": {
+    "hono": "^4.12.25",
+    "yaml": "^2.8.2",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260611.1",
+    "@types/node": "^24.10.1",
+    "miniflare": "^4.20260611.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15",
+    "wrangler": "^4.100.0"
+  }
+}

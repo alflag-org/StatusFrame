@@ -1,0 +1,15 @@
+[tools]
+node = "24.16.0"
+"npm:pnpm" = "11.5.3"
+
+[tasks.install]
+description = "Install workspace dependencies"
+run = "pnpm install"
+
+[tasks.validate]
+description = "Run typecheck and tests"
+run = "pnpm validate"
+
+[tasks.dev]
+description = "Start the local Cloudflare Worker"
+run = "pnpm --filter @statusframe/worker dev"

@@ -1,0 +1,69 @@
+site:
+  name: Public Safe Status
+  description: Service status for customers
+  timezone: UTC
+
+features:
+  monitoring:
+    enabled: true
+  incidents:
+    enabled: false
+  maintenance:
+    enabled: false
+  notifications:
+    enabled: true
+  metrics:
+    enabled: false
+  admin_api:
+    enabled: false
+  storage:
+    enabled: true
+
+storage:
+  adapter: memory
+  raw_results:
+    enabled: false
+
+status_states:
+  - id: operational
+    label: Operational
+    severity: 0
+  - id: degraded
+    label: Degraded
+    severity: 1
+  - id: offline
+    label: Offline
+    severity: 2
+  - id: unknown
+    label: Unknown
+    severity: 1
+
+components:
+  - id: api
+    name: API
+    description: Public API surface
+    status_policy:
+      source: monitors
+
+monitors:
+  - id: api-primary
+    component: api
+    enabled: true
+    required: true
+    type: http
+    target: https://example.com/healthz
+    interval: 60s
+    timeout: 5s
+    expect:
+      status: 200
+    reveal:
+      target: false
+      error: false
+      latency: false
+
+notifications:
+  - id: generic-webhook
+    type: webhook
+    url: ${STATUSFRAME_WEBHOOK_URL}
+    events:
+      - component_status_changed
