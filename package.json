@@ -6,7 +6,8 @@
   "packageManager": "pnpm@11.5.3",
   "scripts": {
     "build": "tsc --noEmit",
-    "dev": "pnpm --filter @statusframe/worker dev",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "validate": "pnpm typecheck && pnpm test"

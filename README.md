@@ -2,6 +2,8 @@
 
 StatusFrame is a lightweight, extension-first public status page framework.
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/viasnake/StatusFrame)
+
 It is not an uptime dashboard. The core rule is:
 
 ```text
@@ -26,13 +28,28 @@ The minimal deployment renders a public status page and `/api/status` from stati
 - Incident, maintenance, metrics, webhook notification, and admin API extensions.
 - Example YAML configs and focused Vitest coverage.
 
+## Deploy to Cloudflare
+
+Use the button above to create your own copy of StatusFrame and deploy it with Cloudflare Workers Builds.
+
+Cloudflare reads the root `wrangler.jsonc`, provisions the declared D1 database and binding for the target account, and deploys the Worker. The default configuration uses static storage, so the first deployment works without configuring application secrets or external services.
+
+The repository root is intentionally the deployment root. Do not point the Deploy to Cloudflare URL at `apps/worker`: the Worker depends on workspace packages elsewhere in this monorepo.
+
+For a manual deployment from a cloned repository:
+
+```bash
+pnpm install
+pnpm deploy
+```
+
 ## Quick Start
 
 ```bash
 mise install
 pnpm install
 pnpm validate
-pnpm --filter @statusframe/worker dev
+pnpm dev
 ```
 
 Convenience tasks are also available:

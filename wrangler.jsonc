@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "statusframe",
-  "main": "src/index.ts",
+  "main": "apps/worker/src/index.ts",
   "compatibility_date": "2026-06-11",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
@@ -18,8 +18,7 @@
     {
       "binding": "STATUSFRAME_DB",
       "database_name": "statusframe",
-      "database_id": "replace-with-d1-database-id",
-      "migrations_dir": "migrations"
+      "migrations_dir": "apps/worker/migrations"
     }
   ]
 }
