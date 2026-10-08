@@ -10,3 +10,8 @@ monitors:
     type: http
     url: https://example.com/
     interval: 5m
+    timeout: 5s
+    failure_threshold: 3
+    recovery_threshold: 2
+    expect:
+      status: 200

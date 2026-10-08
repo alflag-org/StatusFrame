@@ -1,80 +1,40 @@
-create table if not exists monitor_state (
-  monitor_id text primary key,
-  component_id text not null,
-  status text not null,
-  checked_at text not null,
-  latency_ms integer,
-  failure_count integer not null default 0,
-  last_error_code text
+CREATE TABLE monitor_runtime (
+  monitor_id TEXT PRIMARY KEY,
+  config_hash TEXT NOT NULL,
+  last_checked_at INTEGER,
+  next_due_at INTEGER NOT NULL,
+  current_state TEXT NOT NULL CHECK(current_state IN ('unknown', 'up', 'down')),
+  consecutive_failures INTEGER NOT NULL CHECK(consecutive_failures >= 0),
+  consecutive_successes INTEGER NOT NULL CHECK(consecutive_successes >= 0)
 );
-
-create table if not exists component_state (
-  component_id text primary key,
-  status text not null,
-  latency_state text,
-  updated_at text not null
+CREATE TABLE public_snapshot (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  snapshot_json TEXT NOT NULL CHECK(json_valid(snapshot_json))
 );
-
-create table if not exists state_events (
-  id text primary key,
-  kind text not null,
-  target_id text not null,
-  old_status text,
-  new_status text not null,
-  created_at text not null
+CREATE TABLE incidents (
+  id TEXT PRIMARY KEY,
+  started_at TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('investigating', 'identified', 'monitoring', 'resolved')),
+  record_json TEXT NOT NULL CHECK(json_valid(record_json))
 );
-
-create table if not exists uptime_buckets (
-  component_id text not null,
-  bucket_start text not null,
-  bucket_size text not null,
-  ok_count integer not null default 0,
-  fail_count integer not null default 0,
-  unknown_count integer not null default 0,
-  primary key (component_id, bucket_start, bucket_size)
+CREATE INDEX incidents_active ON incidents(started_at DESC) WHERE status != 'resolved';
+CREATE INDEX incidents_history ON incidents(started_at DESC) WHERE status = 'resolved';
+CREATE TABLE maintenance (
+  id TEXT PRIMARY KEY,
+  starts_at TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('scheduled', 'in_progress', 'completed', 'cancelled')),
+  record_json TEXT NOT NULL CHECK(json_valid(record_json))
 );
-
-create table if not exists public_snapshots (
-  id text primary key,
-  snapshot_json text not null,
-  created_at text not null
+CREATE INDEX maintenance_active ON maintenance(starts_at DESC) WHERE status IN ('scheduled', 'in_progress');
+CREATE INDEX maintenance_history ON maintenance(starts_at DESC) WHERE status IN ('completed', 'cancelled');
+CREATE TABLE scheduler_lock (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  owner TEXT,
+  expires_at INTEGER NOT NULL DEFAULT 0
 );
-
-create table if not exists incidents (
-  id text primary key,
-  title text not null,
-  status text not null,
-  impact text not null,
-  body text,
-  started_at text not null,
-  resolved_at text
-);
-
-create table if not exists incident_components (
-  incident_id text not null,
-  component_id text not null,
-  primary key (incident_id, component_id)
-);
-
-create table if not exists incident_updates (
-  id text primary key,
-  incident_id text not null,
-  status text not null,
-  body text not null,
-  created_at text not null
-);
-
-create table if not exists maintenance_windows (
-  id text primary key,
-  title text not null,
-  status text not null,
-  body text,
-  starts_at text not null,
-  ends_at text not null
-);
-
-create table if not exists maintenance_components (
-  maintenance_id text not null,
-  component_id text not null,
-  primary key (maintenance_id, component_id)
+INSERT INTO scheduler_lock(id) VALUES (1);
+CREATE TABLE notification_outbox (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  event_json TEXT NOT NULL CHECK(json_valid(event_json))
 );

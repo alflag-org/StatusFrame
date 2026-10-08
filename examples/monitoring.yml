@@ -1,75 +1,42 @@
 site:
   name: Example Status
   timezone: Asia/Tokyo
-
-runtime:
-  scheduler:
-    tick: 60s
-    concurrency: 4
-    jitter: true
-  budget:
-    max_subrequests_per_tick: 40
-    max_d1_queries_per_tick: 10
-    max_d1_writes_per_tick: 100
-    max_notifications_per_tick: 5
-    max_due_jobs_per_tick: 40
-
-features:
-  monitoring:
-    enabled: true
-  incidents:
-    enabled: false
-  maintenance:
-    enabled: false
-  notifications:
-    enabled: false
-  metrics:
-    enabled: false
-  admin_api:
-    enabled: false
-  storage:
-    enabled: true
-
-storage:
-  adapter: memory
-  raw_results:
-    enabled: false
-
-status_states:
-  - id: operational
-    label: Operational
-    severity: 0
-  - id: degraded
-    label: Degraded
-    severity: 1
-  - id: major_outage
-    label: Major outage
-    severity: 2
-  - id: unknown
-    label: Unknown
-    severity: 1
-
 components:
   - id: web
-    name: Web services
-    status_policy:
-      source: monitors
-      degraded_if: any_failed
-      down_if: all_failed
-
+    name: Web
+  - id: game
+    name: Game Services
 monitors:
-  - id: web-health
+  - id: website-check
     component: web
-    enabled: true
-    required: true
     type: http
-    target: https://example.com/healthz
-    interval: 60s
+    url: https://example.com/health
+    method: GET
+    interval: 5m
     timeout: 5s
+    failure_threshold: 3
+    recovery_threshold: 2
+    follow_redirects: false
     expect:
       status: 200
       body_contains: ok
-    reveal:
-      target: false
-      error: false
-      latency: false
+  - id: game-connectivity
+    component: game
+    type: tcp
+    host: play.example.com
+    port: 25565
+    interval: 1m
+  - id: name-resolution
+    component: web
+    type: dns
+    name: example.com
+    record_type: A
+    interval: 15m
+    expect:
+      values: [192.0.2.10]
+  - id: certificate-check
+    component: web
+    type: tls
+    host: example.com
+    port: 443
+    interval: 1h

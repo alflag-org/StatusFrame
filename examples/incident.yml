@@ -1,52 +1,36 @@
 site:
   name: Example Status
   timezone: Asia/Tokyo
-
-features:
-  monitoring:
-    enabled: false
-  incidents:
-    enabled: true
-  maintenance:
-    enabled: false
-  notifications:
-    enabled: false
-  metrics:
-    enabled: false
-  admin_api:
-    enabled: false
-  storage:
-    enabled: false
-
-status_states:
-  - id: operational
-    label: Operational
-    severity: 0
-  - id: degraded
-    label: Degraded
-    severity: 1
-  - id: major_outage
-    label: Major outage
-    severity: 2
-  - id: unknown
-    label: Unknown
-    severity: 1
-
 components:
-  - id: game
-    name: Game services
-    status: degraded
-
+  - id: web
+    name: Web
+monitors:
+  - id: website-check
+    component: web
+    type: http
+    url: https://example.com/
+    interval: 5m
 incidents:
-  - id: inc_20260612_game
-    title: Game services connectivity issue
-    status: investigating
-    impact: degraded
-    components:
-      - game
-    body: Some users may experience connection failures.
-    started_at: 2026-06-12T10:00:00+09:00
+  - id: web-disruption
+    title: Web service disruption
+    status: identified
+    impact: partial_outage
+    components: [web]
+    started_at: '2026-01-01T00:00:00Z'
     updates:
       - status: investigating
-        body: We are investigating connectivity issues affecting game services.
-        created_at: 2026-06-12T10:00:00+09:00
+        body: We are investigating intermittent service failures.
+        created_at: '2026-01-01T00:00:00Z'
+      - status: identified
+        body: We have identified the cause and are restoring service.
+        created_at: '2026-01-01T00:10:00Z'
+maintenance:
+  - id: service-upgrade
+    title: Scheduled service upgrade
+    status: scheduled
+    components: [web]
+    starts_at: '2026-12-01T00:00:00Z'
+    ends_at: '2026-12-01T01:00:00Z'
+    body: Web services may be briefly unavailable during the upgrade.
+notifications:
+  webhook: true

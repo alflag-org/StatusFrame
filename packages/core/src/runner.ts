@@ -1,322 +1,131 @@
-import type { MonitorConfig, StatusFrameConfig } from "@statusframe/schema";
-import { parseDurationMs } from "@statusframe/schema";
-import { createBudgetTracker, type BudgetUsage } from "./budget";
-import { createExtensionRegistry, extensionCost, type ExtensionRegistry } from "./extension";
-import { assertPublicOutput } from "./redaction";
-import { aggregateComponentStates, generatePublicSnapshot } from "./projection";
-import type {
-  ComponentState,
-  NormalizedMonitorState,
-  NotificationEvent,
-  PublicProjectionContext,
-  PublicProjectionPatch,
-  PublicSnapshot,
-  StatusFrameExtension,
-  StorageAdapter,
-  TcpConnector
-} from "./types";
-import { validateConfig } from "./validation";
+import { Budget, BudgetExceeded } from "./budget";
+import { durationMs, type Config, type Incident, type Maintenance } from "./config";
+import { assertPublic, effectiveMaintenance, project, sameContent, transitionEvents } from "./projection";
+import { D1Store, type Commit } from "./storage";
+import { advanceState, initialState } from "./state";
+import type { MonitorRuntime, NotificationEvent, RunMonitor, RuntimeIO, StoredView, TickResult } from "./types";
 
 export interface RunnerOptions {
-  config: StatusFrameConfig;
-  extensions?: StatusFrameExtension[];
-  registry?: ExtensionRegistry;
-  storage: StorageAdapter;
-  fetch?: typeof fetch;
-  tcpConnect?: TcpConnector;
-  env?: Record<string, string | undefined>;
+  config: Config;
+  db: D1Database;
+  io: RuntimeIO;
+  runMonitor: RunMonitor;
+  notify?: (event: NotificationEvent, budget: Budget) => Promise<void>;
+  secrets?: string[];
 }
-
-export interface RunnerResult {
-  snapshot: PublicSnapshot;
-  monitorStates: NormalizedMonitorState[];
-  componentStates: ComponentState[];
-  skippedJobs: Array<{ id: string; reason: string }>;
-  budgetUsage: BudgetUsage;
+async function hash(value: unknown): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(value)));
+  return Array.from(new Uint8Array(bytes), n => n.toString(16).padStart(2, "0")).join("");
 }
-
-export interface StatusFrameRunner {
-  registry: ExtensionRegistry;
-  getPublicSnapshot(now?: Date): Promise<PublicSnapshot>;
-  regeneratePublicSnapshot(now?: Date): Promise<PublicSnapshot>;
-  runScheduled(now?: Date): Promise<RunnerResult>;
-  handleAdminRequest(request: Request): Promise<Response | undefined>;
+function merge<T extends { id: string }>(stored: T[], configured: T[]): T[] {
+  const entries = new Map(stored.map(v => [v.id, v]));
+  for (const v of configured) entries.set(v.id, v);
+  return [...entries.values()];
 }
-
-export function createStatusFrameRunner(options: RunnerOptions): StatusFrameRunner {
-  const registry = options.registry ?? createExtensionRegistry(options.extensions ?? []);
-  const runtimeFetch = options.fetch ?? fetch;
-  const env = options.env ?? {};
-
-  async function collectProjectionPatches(input: {
-    componentStates: ComponentState[];
-    monitorStates: NormalizedMonitorState[];
-    now: Date;
-  }): Promise<PublicProjectionPatch[]> {
-    const components = generatePublicSnapshot({
-      config: options.config,
-      componentStates: input.componentStates,
-      monitorStates: input.monitorStates,
-      now: input.now,
-      patches: []
-    }).components;
-    const ctx: PublicProjectionContext = {
-      config: options.config,
-      components,
-      componentStates: input.componentStates,
-      monitorStates: input.monitorStates,
-      now: input.now
-    };
-    const patches = await Promise.all(
-      registry.extensions.map(async (extension) => extension.projectPublic?.(ctx) ?? {})
-    );
-    return patches;
-  }
-
-  async function regeneratePublicSnapshot(now = new Date()): Promise<PublicSnapshot> {
-    const storedStates = await options.storage.loadComponentStates?.();
-    const componentStates =
-      storedStates && storedStates.length > 0
-        ? storedStates
-        : aggregateComponentStates({ config: options.config, now });
-    const patches = await collectProjectionPatches({ componentStates, monitorStates: [], now });
-    const snapshot = generatePublicSnapshot({
-      config: options.config,
-      componentStates,
-      monitorStates: [],
-      patches,
-      now
-    });
-    assertPublicOutput(snapshot);
-    await options.storage.savePublicSnapshot(snapshot);
-    return snapshot;
-  }
-
+function sortIncidents(entries: Incident[]): Incident[] {
+  return [...entries].sort((a, b) => Number(b.status !== "resolved") - Number(a.status !== "resolved") || Date.parse(b.started_at) - Date.parse(a.started_at) || a.id.localeCompare(b.id)).slice(0, 50);
+}
+function sortMaintenance(entries: Maintenance[]): Maintenance[] {
+  const active = (v: Maintenance) => Number(["scheduled", "in_progress"].includes(v.status));
+  return [...entries].sort((a, b) => active(b) - active(a) || Date.parse(b.starts_at) - Date.parse(a.starts_at) || a.id.localeCompare(b.id)).slice(0, 50);
+}
+export function createRunner(options: RunnerOptions) {
+  const { config } = options;
   return {
-    registry,
-    async getPublicSnapshot(now = new Date()) {
-      const stored = await options.storage.loadPublicSnapshot();
-      if (stored) {
-        assertPublicOutput(stored);
-        return stored;
-      }
-      return regeneratePublicSnapshot(now);
+    async getSnapshot(now = Date.now()) {
+      const store = new D1Store(options.db, new Budget(config.budget));
+      const snapshot = await store.loadSnapshot() ?? project(config, [], [], [], now);
+      assertPublic(snapshot, config, options.secrets);
+      return snapshot;
     },
-    regeneratePublicSnapshot,
-    async runScheduled(now = new Date()) {
-      const validation = validateConfig(options.config, registry);
-      if (!validation.ok) {
-        throw new Error(`Invalid StatusFrame config: ${validation.issues.map((issue) => issue.message).join("; ")}`);
-      }
-
-      const previousSnapshot = await options.storage.loadPublicSnapshot();
-      const skippedJobs: Array<{ id: string; reason: string }> = [];
-      const budget = createBudgetTracker({
-        maxSubrequests: options.config.runtime.budget.max_subrequests_per_tick,
-        maxD1Reads: options.config.runtime.budget.max_d1_queries_per_tick,
-        maxD1Writes: options.config.runtime.budget.max_d1_writes_per_tick,
-        maxNotifications: options.config.runtime.budget.max_notifications_per_tick,
-        maxDueJobs: options.config.runtime.budget.max_due_jobs_per_tick
+    async runScheduled(now = Date.now()): Promise<TickResult> {
+      const budget = new Budget(config.budget);
+      const store = new D1Store(options.db, budget);
+      const result: TickResult = { checked: [], skipped: [], notified: 0, usage: budget.usage };
+      const hashes = new Map(await Promise.all(config.monitors.map(async v => [v.id, await hash(v)] as const)));
+      const runtimeStates = (view: StoredView): MonitorRuntime[] => config.monitors.map(m => {
+        const saved = view.monitors.find(v => v.monitor_id === m.id && v.config_hash === hashes.get(m.id));
+        return saved ?? initialState(m, hashes.get(m.id)!);
       });
-
-      const monitorStates = options.config.features.monitoring.enabled
-        ? await executeDueMonitors({
-            config: options.config,
-            registry,
-            now,
-            runtimeFetch,
-            budget,
-            skippedJobs,
-            ...(options.tcpConnect ? { tcpConnect: options.tcpConnect } : {})
-          })
-        : [];
-
-      await options.storage.saveMonitorStates?.(monitorStates);
-      const componentStates = aggregateComponentStates({ config: options.config, monitorStates, now });
-      await options.storage.saveComponentStates?.(componentStates);
-
-      const patches = await collectProjectionPatches({ componentStates, monitorStates, now });
-      const snapshot = generatePublicSnapshot({
-        config: options.config,
-        componentStates,
-        monitorStates,
-        patches,
-        now
-      });
-      assertPublicOutput(snapshot);
-      await options.storage.savePublicSnapshot(snapshot);
-
-      const notificationEvents = buildNotificationEvents(previousSnapshot, snapshot, now);
-      for (const event of notificationEvents) {
-        const decision = budget.canNotify();
-        if (!decision.allowed) {
-          skippedJobs.push({ id: event.type, reason: decision.reason ?? "notification_budget" });
-          continue;
-        }
-        await Promise.all(
-          registry.extensions.map(async (extension) => {
-            if (extension.notify) {
-              await extension.notify({ config: options.config, event, env, fetch: runtimeFetch });
-            }
-          })
-        );
-        budget.recordNotification();
-      }
-
-      return {
-        snapshot,
-        monitorStates,
-        componentStates,
-        skippedJobs,
-        budgetUsage: { ...budget.usage }
+      const projection = (view: StoredView, states: MonitorRuntime[]) => {
+        const currentIds = new Set(config.components.map(v => v.id));
+        const incidents = merge(view.incidents, config.incidents).map(v => ({ ...v, components: v.components.filter(id => currentIds.has(id)) })).filter(v => v.components.length);
+        const maintenance = merge(view.maintenance, config.maintenance).map(v => effectiveMaintenance({ ...v, components: v.components.filter(id => currentIds.has(id)) }, now)).filter(v => v.components.length);
+        return { incidents, maintenance, snapshot: project(config, states, sortIncidents(incidents), sortMaintenance(maintenance), now) };
       };
-    },
-    async handleAdminRequest(request: Request) {
-      for (const extension of registry.extensions) {
-        const response = await extension.handleAdminRequest?.({
-          request,
-          config: options.config,
-          env,
-          regenerateSnapshot: regeneratePublicSnapshot,
-          validateConfiguration: () => validateConfig(options.config, registry)
-        });
-        if (response) return response;
+      let view = await store.loadView(config.incidents.map(v => v.id), config.maintenance.map(v => v.id));
+      let states = runtimeStates(view);
+      let next = projection(view, states);
+      assertPublic(next.snapshot, config, options.secrets);
+      const due = states.filter(v => v.next_due_at <= now);
+      const visibleChange = !sameContent(view.snapshot, next.snapshot);
+      const domainChange = next.incidents.some(v => JSON.stringify(view.incidents.find(old => old.id === v.id)) !== JSON.stringify(v)) ||
+        next.maintenance.some(v => JSON.stringify(view.maintenance.find(old => old.id === v.id)) !== JSON.stringify(v));
+      if (due.length || visibleChange || domainChange || view.monitors.some(v => !hashes.has(v.monitor_id))) {
+        // Reserve room for the second read, lease release, and at least one snapshot write.
+        if (!budget.can({ d1_reads: 4, d1_writes: 3, subrequests: 7 })) {
+          result.skipped.push(...due.map(v => v.monitor_id));
+          return result;
+        }
+        const owner = crypto.randomUUID();
+        const wallStart = Date.now();
+        if (!await store.acquire(owner, wallStart)) return result;
+        try {
+          view = await store.loadView(config.incidents.map(v => v.id), config.maintenance.map(v => v.id));
+          states = runtimeStates(view);
+          next = projection(view, states);
+          const changes: Commit = {
+            monitors: [],
+            incidents: next.incidents.filter(v => JSON.stringify(view.incidents.find(old => old.id === v.id)) !== JSON.stringify(v)),
+            maintenance: next.maintenance.filter(v => JSON.stringify(view.maintenance.find(old => old.id === v.id)) !== JSON.stringify(v)),
+            snapshot: null, events: [], remove_monitor_ids: view.monitors.filter(v => !hashes.has(v.monitor_id)).map(v => v.monitor_id)
+          };
+          const domainEvents = config.notifications.webhook ? transitionEvents(view.snapshot, next.snapshot).length : 0;
+          const reservedWrites = changes.incidents.length + changes.maintenance.length + domainEvents + 2 + Number(!!changes.remove_monitor_ids?.length);
+          if (!budget.can({ d1_writes: reservedWrites, subrequests: reservedWrites })) throw new BudgetExceeded("d1_writes");
+          for (const state of [...states].sort((a, b) => a.next_due_at - b.next_due_at || a.monitor_id.localeCompare(b.monitor_id))) {
+            if (state.next_due_at > now) continue;
+            const monitor = config.monitors.find(v => v.id === state.monitor_id)!;
+            // Two writes conservatively reserve the runtime row and a possible transition event.
+            const jobWrites = config.notifications.webhook ? 2 : 1;
+            const networkCost = monitor.type === "http" && monitor.follow_redirects ? 6 : 1;
+            if (Date.now() - wallStart + durationMs(monitor.timeout) > 45_000 ||
+                !budget.can({ due_jobs: 1, d1_writes: reservedWrites + (changes.monitors.length + 1) * jobWrites,
+                  subrequests: reservedWrites + (changes.monitors.length + 1) * jobWrites + networkCost })) {
+              result.skipped.push(monitor.id); continue;
+            }
+            budget.take({ due_jobs: 1 });
+            let ok: boolean;
+            try { ok = (await options.runMonitor(monitor, { io: options.io, budget, now })).ok; }
+            catch (error) { if (error instanceof BudgetExceeded) { result.skipped.push(monitor.id); continue; } throw error; }
+            const updated = advanceState(state, monitor, ok, now);
+            states[states.findIndex(v => v.monitor_id === monitor.id)] = updated;
+            changes.monitors.push(updated);
+            result.checked.push(monitor.id);
+          }
+          next = projection(view, states);
+          assertPublic(next.snapshot, config, options.secrets);
+          if (!sameContent(view.snapshot, next.snapshot)) {
+            changes.snapshot = next.snapshot;
+            if (config.notifications.webhook) changes.events = transitionEvents(view.snapshot, next.snapshot);
+          }
+          await store.commit(owner, changes, Date.now());
+        } catch (error) {
+          if (budget.can({ d1_writes: 1, subrequests: 1 })) await store.release(owner);
+          throw error;
+        }
       }
-      return undefined;
+      if (config.notifications.webhook && options.notify && budget.can({ d1_reads: 1, subrequests: 1 })) {
+        const events = await store.pending(config.budget.max_notifications);
+        for (const event of events) {
+          if (!budget.can({ d1_writes: 1, notifications: 1, subrequests: 2 })) break;
+          // Claim before delivery gives at most one attempt, including overlapping Cron invocations.
+          if (!await store.claimEvent(event.id)) continue;
+          try { await options.notify(event, budget); result.notified++; }
+          catch { console.warn("StatusFrame webhook delivery failed"); }
+        }
+      }
+      return result;
     }
   };
-}
-
-async function executeDueMonitors(options: {
-  config: StatusFrameConfig;
-  registry: ExtensionRegistry;
-  now: Date;
-  runtimeFetch: typeof fetch;
-  tcpConnect?: TcpConnector;
-  budget: ReturnType<typeof createBudgetTracker>;
-  skippedJobs: Array<{ id: string; reason: string }>;
-}): Promise<NormalizedMonitorState[]> {
-  const runnable: MonitorConfig[] = [];
-  for (const monitor of options.config.monitors.filter((item) => item.enabled !== false)) {
-    const extension = options.registry.monitorTypes.get(monitor.type);
-    const decision = options.budget.canRun(extensionCost(extension));
-    if (!decision.allowed) {
-      options.skippedJobs.push({ id: monitor.id, reason: decision.reason ?? "budget" });
-      continue;
-    }
-    options.budget.record(extensionCost(extension));
-    runnable.push(monitor);
-  }
-
-  const concurrency = options.config.runtime.scheduler.concurrency;
-  return runWithConcurrency(runnable, concurrency, async (monitor) => {
-    const runMonitor = options.registry.getMonitor(monitor.type);
-    if (!runMonitor) {
-      return {
-        monitorId: monitor.id,
-        componentId: monitor.component,
-        type: monitor.type,
-        required: monitor.required !== false,
-        ok: false,
-        checkedAt: options.now.toISOString(),
-        private: {
-          errorCode: "monitor_type_not_registered"
-        }
-      };
-    }
-
-    const started = Date.now();
-    const signal = timeoutSignal(parseDurationMs(monitor.timeout));
-    try {
-      const result = await runMonitor({
-        config: options.config,
-        monitor,
-        now: options.now,
-        fetch: options.runtimeFetch,
-        ...(signal ? { signal } : {}),
-        ...(options.tcpConnect ? { tcpConnect: options.tcpConnect } : {})
-      });
-      const state: NormalizedMonitorState = {
-        monitorId: monitor.id,
-        componentId: monitor.component,
-        type: monitor.type,
-        required: monitor.required !== false,
-        ok: result.ok,
-        checkedAt: result.checkedAt
-      };
-      if (typeof result.latencyMs === "number") state.latencyMs = result.latencyMs;
-      if (result.publicHint) state.publicHint = result.publicHint;
-      if (result.private) state.private = result.private;
-      return state;
-    } catch (error) {
-      return {
-        monitorId: monitor.id,
-        componentId: monitor.component,
-        type: monitor.type,
-        required: monitor.required !== false,
-        ok: false,
-        checkedAt: options.now.toISOString(),
-        latencyMs: Date.now() - started,
-        private: {
-          errorCode: error instanceof DOMException && error.name === "TimeoutError" ? "timeout" : "monitor_failed",
-          errorMessage: error instanceof Error ? error.message : "Monitor failed"
-        }
-      };
-    }
-  });
-}
-
-async function runWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  worker: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = [];
-  let index = 0;
-
-  async function runNext(): Promise<void> {
-    const current = index;
-    index += 1;
-    if (current >= items.length) return;
-    const item = items[current];
-    if (item === undefined) return;
-    results[current] = await worker(item);
-    await runNext();
-  }
-
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => runNext()));
-  return results;
-}
-
-function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
-  if (typeof AbortSignal !== "undefined" && "timeout" in AbortSignal) {
-    return AbortSignal.timeout(timeoutMs);
-  }
-  return undefined;
-}
-
-function buildNotificationEvents(
-  previous: PublicSnapshot | undefined,
-  current: PublicSnapshot,
-  now: Date
-): NotificationEvent[] {
-  if (!previous) return [];
-
-  const events: NotificationEvent[] = [];
-  const previousComponents = new Map(previous.components.map((component) => [component.id, component]));
-  for (const component of current.components) {
-    const before = previousComponents.get(component.id);
-    if (before && before.status !== component.status) {
-      events.push({
-        type: "component_status_changed",
-        createdAt: now.toISOString(),
-        payload: {
-          component_id: component.id,
-          old_status: before.status,
-          new_status: component.status
-        }
-      });
-    }
-  }
-  return events;
 }

@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "statusframe",
+  "main": "apps/worker/src/index.ts",
+  "workers_dev": true,
+  "preview_urls": false,
+  "compatibility_date": "2026-06-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "rules": [{ "type": "Text", "globs": ["**/*.yml"], "fallthrough": true }],
+  "triggers": { "crons": ["* * * * *"] },
+  "d1_databases": [{
+    "binding": "STATUSFRAME_DB",
+    "database_name": "statusframe",
+    "database_id": "00000000-0000-0000-0000-000000000000",
+    "migrations_dir": "apps/worker/migrations"
+  }]
+}

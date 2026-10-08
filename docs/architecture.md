@@ -1,118 +1,49 @@
 # Architecture
 
-StatusFrame is a public-safe status page framework. It deliberately avoids behaving like a public infrastructure monitoring dashboard.
+StatusFrame runs in a single Cloudflare Worker with fetch and scheduled handlers, and D1 is its only production storage. The root `wrangler.jsonc` defines the Worker entry point, D1 binding, and Cron trigger.
 
-Core rule:
+## Ownership
 
-```text
-Do not publish your infrastructure.
-Publish your service status.
-```
+- `apps/worker`: bundles YAML, wires Workers fetch/sockets, binds D1 and webhook secrets, and exposes read-only routes.
+- `packages/core`: validates configuration and domain records, owns the scheduler/state machine, projects public snapshots, enforces budgets, stores records in D1, and renders HTML.
+- `packages/monitors`: implements four concrete checks. Only the external fetch/socket I/O is supplied at the runtime boundary.
+- `packages/notifications`: implements signed HTTPS webhook delivery.
 
-## Product Model
+## Scheduled execution
 
-StatusFrame has three layers:
+The runner reads persisted monitor runtime, bounded incident/maintenance records, and the previous public snapshot. Monitor runtime contains its private ID, configuration hash, last check, next due time, internal state, and saturated consecutive-result counters.
 
-```text
-Core Framework
-  -> official extensions
-  -> user extensions
-```
+Only monitors whose next due time has arrived are candidates. Changes to monitor configuration reset that monitor to unknown and make it immediately due. Oldest due times are processed first, breaking ties by monitor ID. Execution is sequential and limited by actual budgets and a 45-second admission window. Skipped work remains due for a later tick. Checks are not replayed for missed intervals.
 
-Official extensions are not special. They use the same `StatusFrameExtension` interface that third-party extensions use.
+When due work or domain/public changes exist, the runner acquires the singleton D1 scheduler lease, then rereads persisted data. The lease lasts 120 seconds and is not acquired for entirely unchanged, not-due ticks. State/domain/snapshot/outbox mutations and lease release are one D1 batch transaction. Every mutation is conditional on the same unexpired owner token; stale invocations cannot publish over a new owner. An expired crashed invocation becomes recoverable on subsequent ticks.
 
-## Layering Rule
+D1 read failures, commit failures, or unexpected runner errors fail the invocation. External monitor errors produce a private failed result; budget exhaustion does not count as a monitor failure. No raw response, header, diagnostic message, or per-check history is stored.
 
-```text
-apps/worker
-  -> packages/core
-  -> packages/schema
+## Projection
 
-packages/extensions/*
-  -> packages/core
+The pipeline is private runtime → explicit public field selection → strict public-model validation → D1 snapshot → validated public routes. Component state is computed from every configured monitor, including stored states of monitors which are not due.
 
-packages/storage/*
-  -> packages/core
-```
+| Internal component monitor states | Public status |
+| --- | --- |
+| No monitors, or any unknown with no failures | unknown |
+| All up | operational |
+| Some down | partial_outage |
+| All down | major_outage |
 
-Core owns orchestration, validation, public projection, redaction, status aggregation, and budget enforcement. Core must not depend on extension or storage packages.
+An active incident may worsen the result to its declared impact. Site severity is operational < unknown < degraded < partial_outage < major_outage. Maintenance is published separately and does not hide failures.
 
-Storage packages implement `StorageAdapter`. Extension packages implement `StatusFrameExtension`. The Worker package composes the concrete adapters and extensions at build time.
+Projection contains no monitor objects or diagnostic hints. The snapshot is persisted only when public content changes; `site.updated_at` is the last content-change time. Public fetches only read it and never perform monitoring or save fallback snapshots.
 
-## Runtime Model
+## Domains and delivery
 
-Extension boundaries are feature boundaries, not Worker invocation boundaries.
+Incidents and maintenance are core records, declaratively edited through YAML deployment and persisted in D1. Active entries are prioritized in the public view; up to 50 entries per domain are shown. Persistence retains history beyond that view. Indexed queries load bounded active/history windows plus explicitly configured IDs, so editing an older record remains possible without full history scans.
 
-```text
-statusframe Worker
-  -> Core runner
-  -> Extension registry
-  -> Registered extensions
-```
+Notifications are created only by snapshot/domain changes after the initial baseline. Events are committed atomically with their public state. Due to the uncertainty of webhook transport, delivery is an at-most-once attempt: a conditional outbox deletion claims the event before sending. Budget deferral retains unclaimed events; transport failure/crash after claiming can lose delivery. Receivers get a unique event ID and optional exact-body HMAC signature.
 
-The scheduled handler is the only standard background execution point. It loads bundled config, selects due jobs, enforces budgets, runs registered extensions, aggregates component state, saves state, generates a public snapshot, and sends notifications when budget allows.
+## Verification
 
-Public requests must not execute monitors. Public routes read or generate public snapshots only.
+`pnpm test` runs deterministic unit tests in `tests/unit`. Fetch/socket boundaries use controlled I/O; timers are advanced explicitly for timeout cases. The suite covers public-data isolation, thresholds, redirects, bounded responses, native TLS I/O, operation budgets, and webhook signing/failure behavior.
 
-## Public Data Flow
+`pnpm test:integration` checks D1 transactions, lease ownership, persistence across process restart, Worker routes, and runtime fetch compatibility using local workerd. These tests retain the real database/runtime contracts rather than implementing a mock SQL engine. Deployment tests substitute CLI commands to check migration failure and publish ordering without contacting Cloudflare.
 
-```text
-private extension result
-  -> normalized monitor state
-  -> component aggregation
-  -> extension public projection hooks
-  -> redaction and leakage validation
-  -> PublicSnapshot
-  -> HTML or JSON
-```
-
-Public output may include site metadata, public component names, public statuses, active incidents, scheduled maintenance, and explicitly enabled aggregate metrics.
-
-Public output must not include monitor targets, private IPs, internal hostnames, raw monitor IDs, raw errors, stack traces, response bodies, request or response headers, webhook URLs, provider tokens, secrets, or backend dependency lists.
-
-## Config Model
-
-YAML is the primary user-facing config format. `@statusframe/schema` parses YAML into `StatusFrameConfig`; `@statusframe/core` validates semantic references against the extension registry.
-
-The minimal valid config has:
-
-- site metadata
-- disabled optional features
-- user-defined status states
-- public components with static statuses
-
-It does not require monitors, scheduled jobs, D1, incidents, maintenance, notifications, or metrics.
-
-## Runtime Budgets
-
-The runner enforces conservative per-tick limits:
-
-- due jobs
-- subrequests
-- D1 reads
-- D1 writes
-- notifications
-- scheduler concurrency
-
-Jobs that would exceed budget are skipped or delayed by the runner. Extensions declare approximate cost in their manifest.
-
-## Storage Model
-
-Storage is pluggable:
-
-- static storage for no-storage minimal mode
-- memory storage for local development and tests
-- D1 storage for Cloudflare Workers deployment
-
-Public page and API routes should prefer a stored public snapshot when storage is enabled. Raw monitor result storage is disabled by default.
-
-## Extension Points
-
-Supported extension hooks:
-
-- monitor execution
-- public projection contribution
-- notification delivery
-- admin request handling
-
-The manifest shape also leaves room for future provider, renderer, validation rule, redaction rule, and storage adapter extensions.
+`pnpm build` runs type checking and unit tests. `pnpm validate` adds integration tests and a Wrangler deployment dry run. Native TLS certificate verification and the hosted Deploy Button flow are platform behavior; the suites do not contact live targets or create remote resources.

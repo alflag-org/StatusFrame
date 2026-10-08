@@ -1,68 +1,20 @@
-import type { ExtensionCost } from "./types";
-
-export interface RuntimeBudget {
-  maxSubrequests: number;
-  maxD1Reads: number;
-  maxD1Writes: number;
-  maxNotifications: number;
-  maxDueJobs: number;
+import type { BudgetConfig } from "./types";
+export type Resource = "d1_reads" | "d1_writes" | "subrequests" | "notifications" | "due_jobs";
+export type Usage = Record<Resource, number>;
+export class BudgetExceeded extends Error {
+  constructor(readonly resource: Resource) { super(`Budget exhausted: ${resource}`); }
 }
-
-export interface BudgetUsage {
-  subrequests: number;
-  d1Reads: number;
-  d1Writes: number;
-  notifications: number;
-  dueJobs: number;
-}
-
-export interface BudgetDecision {
-  allowed: boolean;
-  reason?: string;
-}
-
-export function createBudgetTracker(budget: RuntimeBudget) {
-  const usage: BudgetUsage = {
-    subrequests: 0,
-    d1Reads: 0,
-    d1Writes: 0,
-    notifications: 0,
-    dueJobs: 0
-  };
-
-  return {
-    usage,
-    canRun(cost: ExtensionCost): BudgetDecision {
-      if (usage.dueJobs + 1 > budget.maxDueJobs) return { allowed: false, reason: "max_due_jobs_per_tick" };
-      if (usage.subrequests + (cost.subrequestsPerRun ?? 0) > budget.maxSubrequests) {
-        return { allowed: false, reason: "max_subrequests_per_tick" };
-      }
-      if (usage.d1Reads + (cost.d1ReadsPerRun ?? 0) > budget.maxD1Reads) {
-        return { allowed: false, reason: "max_d1_queries_per_tick" };
-      }
-      if (usage.d1Writes + (cost.d1WritesPerRun ?? 0) > budget.maxD1Writes) {
-        return { allowed: false, reason: "max_d1_writes_per_tick" };
-      }
-      if (usage.notifications + (cost.notificationsPerRun ?? 0) > budget.maxNotifications) {
-        return { allowed: false, reason: "max_notifications_per_tick" };
-      }
-      return { allowed: true };
-    },
-    record(cost: ExtensionCost): void {
-      usage.dueJobs += 1;
-      usage.subrequests += cost.subrequestsPerRun ?? 0;
-      usage.d1Reads += cost.d1ReadsPerRun ?? 0;
-      usage.d1Writes += cost.d1WritesPerRun ?? 0;
-      usage.notifications += cost.notificationsPerRun ?? 0;
-    },
-    canNotify(): BudgetDecision {
-      if (usage.notifications + 1 > budget.maxNotifications) {
-        return { allowed: false, reason: "max_notifications_per_tick" };
-      }
-      return { allowed: true };
-    },
-    recordNotification(): void {
-      usage.notifications += 1;
+export class Budget {
+  readonly usage: Usage = { d1_reads: 0, d1_writes: 0, subrequests: 0, notifications: 0, due_jobs: 0 };
+  constructor(readonly limits: BudgetConfig) {}
+  can(cost: Partial<Usage>): boolean {
+    return Object.entries(cost).every(([key, amount]) => this.usage[key as Resource] + amount <= this.limits[`max_${key}` as keyof BudgetConfig]);
+  }
+  take(cost: Partial<Usage>): void {
+    for (const [key, amount] of Object.entries(cost)) {
+      if (!Number.isInteger(amount) || amount < 0) throw new Error("Invalid budget cost");
+      if (this.usage[key as Resource] + amount > this.limits[`max_${key}` as keyof BudgetConfig]) throw new BudgetExceeded(key as Resource);
     }
-  };
+    for (const [key, amount] of Object.entries(cost)) this.usage[key as Resource] += amount;
+  }
 }

@@ -1,29 +1,18 @@
 {
   "name": "@statusframe/worker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "dev": "wrangler dev --config ../../wrangler.jsonc --test-scheduled",
+    "deploy": "pnpm db:remote && wrangler deploy --config ../../wrangler.jsonc",
+    "deploy:check": "wrangler deploy --config ../../wrangler.jsonc --dry-run --outdir ../../dist/worker",
+    "db:local": "wrangler d1 migrations apply STATUSFRAME_DB --config ../../wrangler.jsonc --local",
+    "db:remote": "wrangler d1 migrations apply STATUSFRAME_DB --config ../../wrangler.jsonc --remote"
   },
   "dependencies": {
-    "@statusframe/admin-api": "workspace:*",
     "@statusframe/core": "workspace:*",
-    "@statusframe/incidents": "workspace:*",
-    "@statusframe/maintenance": "workspace:*",
-    "@statusframe/metrics": "workspace:*",
-    "@statusframe/monitor-dns": "workspace:*",
-    "@statusframe/monitor-http": "workspace:*",
-    "@statusframe/monitor-tcp": "workspace:*",
-    "@statusframe/monitor-tls": "workspace:*",
-    "@statusframe/notifications-webhook": "workspace:*",
-    "@statusframe/storage-d1": "workspace:*",
-    "@statusframe/storage-memory": "workspace:*",
-    "@statusframe/storage-static": "workspace:*",
-    "hono": "^4.12.25"
-  },
-  "devDependencies": {
-    "wrangler": "^4.100.0"
+    "@statusframe/monitors": "workspace:*",
+    "@statusframe/notifications": "workspace:*"
   }
 }

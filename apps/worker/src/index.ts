@@ -1,120 +1,46 @@
-import { Hono } from "hono";
-import { createStatusFrameRunner, renderStatusPage } from "@statusframe/core";
-import { adminApiExtension } from "@statusframe/admin-api";
-import { incidentsExtension } from "@statusframe/incidents";
-import { maintenanceExtension } from "@statusframe/maintenance";
-import { metricsExtension } from "@statusframe/metrics";
-import { dnsMonitor } from "@statusframe/monitor-dns";
-import { httpMonitor } from "@statusframe/monitor-http";
-import { tcpMonitor } from "@statusframe/monitor-tcp";
-import { tlsMonitor } from "@statusframe/monitor-tls";
-import { webhookNotifications } from "@statusframe/notifications-webhook";
-import { createD1Storage, type D1DatabaseLike } from "@statusframe/storage-d1";
-import { createMemoryStorage } from "@statusframe/storage-memory";
-import { createStaticStorage } from "@statusframe/storage-static";
-import { statusFrameConfig } from "./statusframe.config";
-
-const memoryStorage = createMemoryStorage();
-
-const extensions = [
-  httpMonitor(),
-  tcpMonitor(),
-  dnsMonitor(),
-  tlsMonitor(),
-  incidentsExtension(),
-  maintenanceExtension(),
-  metricsExtension(),
-  webhookNotifications(),
-  adminApiExtension()
-];
-
-const app = new Hono<{ Bindings: Env }>();
-
-app.get("/", async (c) => {
-  const runner = createRunner(c.env);
-  const snapshot = await runner.getPublicSnapshot();
-  return c.html(renderStatusPage(snapshot), 200, {
-    "cache-control": "public, max-age=30"
+import { connect } from "cloudflare:sockets";
+import { createRunner, renderStatusPage, type RuntimeIO } from "@statusframe/core";
+import { runMonitor } from "@statusframe/monitors";
+import { sendWebhook, type WebhookBindings } from "@statusframe/notifications";
+import { config } from "./config";
+export interface Env extends WebhookBindings { STATUSFRAME_DB: D1Database }
+const io: RuntimeIO = {
+  fetch: (...args) => fetch(...args),
+  connect: (hostname, port, secure) => connect({ hostname, port }, { secureTransport: secure ? "on" : "off", allowHalfOpen: false })
+};
+function runner(env: Env) {
+  if (!env.STATUSFRAME_DB) throw new Error("D1 binding is required");
+  if (config.notifications.webhook && !env.STATUSFRAME_WEBHOOK_URL) throw new Error("Webhook binding is required");
+  return createRunner({ config, db: env.STATUSFRAME_DB, io, runMonitor,
+    secrets: [env.STATUSFRAME_WEBHOOK_URL ?? "", env.STATUSFRAME_WEBHOOK_SECRET ?? ""],
+    ...(config.notifications.webhook ? { notify: (event, budget) => sendWebhook(event, env, budget) } : {})
   });
-});
-
-app.get("/api/status", async (c) => {
-  const runner = createRunner(c.env);
-  const snapshot = await runner.getPublicSnapshot();
-  return c.json(snapshot, 200, {
-    "cache-control": "public, max-age=30"
-  });
-});
-
-app.get("/api/incidents", async (c) => {
-  const runner = createRunner(c.env);
-  const snapshot = await runner.getPublicSnapshot();
-  if (!statusFrameConfig.features.incidents.enabled) {
-    return c.json({ error: "Incidents are disabled" }, 404);
-  }
-  return c.json({ incidents: snapshot.active_incidents });
-});
-
-app.get("/api/maintenance", async (c) => {
-  const runner = createRunner(c.env);
-  const snapshot = await runner.getPublicSnapshot();
-  if (!statusFrameConfig.features.maintenance.enabled) {
-    return c.json({ error: "Maintenance is disabled" }, 404);
-  }
-  return c.json({ maintenance: snapshot.scheduled_maintenance });
-});
-
-app.all("/api/admin/*", async (c) => {
-  const runner = createRunner(c.env);
-  const response = await runner.handleAdminRequest(c.req.raw);
-  return response ?? c.json({ error: "Admin API is disabled" }, 404);
-});
-
+}
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const path = new URL(request.url).pathname;
+    if (!["/", "/api/status", "/api/incidents", "/api/maintenance"].includes(path)) return Response.json({ error: "Not found" }, { status: 404 });
+    if (request.method !== "GET" && request.method !== "HEAD") return Response.json({ error: "Method not allowed" }, { status: 405, headers: { allow: "GET, HEAD" } });
     try {
-      return await app.fetch(request, env, ctx);
-    } catch (error) {
-      console.error(
-        JSON.stringify({
-          message: "statusframe request failed",
-          error: error instanceof Error ? error.message : "Unknown error",
-          path: new URL(request.url).pathname
-        })
-      );
-      return Response.json({ error: "Internal server error" }, { status: 500 });
+      const snapshot = await runner(env).getSnapshot();
+      const headers = {
+        "cache-control": "public, max-age=30", "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+        "referrer-policy": "no-referrer"
+      };
+      let response: Response;
+      if (path === "/") response = new Response(renderStatusPage(snapshot), { headers: { ...headers, "content-type": "text/html; charset=utf-8" } });
+      else response = Response.json(path === "/api/incidents" ? { incidents: snapshot.incidents } :
+        path === "/api/maintenance" ? { maintenance: snapshot.maintenance } : snapshot, { headers });
+      return request.method === "HEAD" ? new Response(null, response) : response;
+    } catch {
+      console.error("StatusFrame public request failed");
+      return Response.json({ error: "Status temporarily unavailable" }, { status: 503, headers: { "cache-control": "no-store" } });
     }
   },
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    const runner = createRunner(env);
-    ctx.waitUntil(runner.runScheduled());
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(runner(env).runScheduled().then(result => {
+      console.info(JSON.stringify({ checked: result.checked.length, skipped: result.skipped.length, notified: result.notified, usage: result.usage }));
+    }).catch(() => { console.error("StatusFrame scheduled run failed"); throw new Error("StatusFrame scheduled run failed"); }));
   }
-};
-
-function createRunner(env: Env) {
-  return createStatusFrameRunner({
-    config: statusFrameConfig,
-    extensions,
-    storage: selectStorage(env),
-    env: toStringEnv(env as unknown as Record<string, unknown>)
-  });
-}
-
-function selectStorage(env: Env) {
-  const mode = typeof env.STATUSFRAME_STORAGE === "string" ? env.STATUSFRAME_STORAGE : statusFrameConfig.storage.adapter;
-  if (mode === "memory") return memoryStorage;
-  if (mode === "d1" && isD1Database(env.STATUSFRAME_DB)) {
-    return createD1Storage(env.STATUSFRAME_DB);
-  }
-  return createStaticStorage();
-}
-
-function toStringEnv(env: Record<string, unknown>): Record<string, string | undefined> {
-  return Object.fromEntries(
-    Object.entries(env).map(([key, value]) => [key, typeof value === "string" ? value : undefined])
-  );
-}
-
-function isD1Database(value: unknown): value is D1DatabaseLike {
-  return Boolean(value && typeof value === "object" && "prepare" in value && typeof value.prepare === "function");
-}
+} satisfies ExportedHandler<Env>;

@@ -1,79 +1,35 @@
 # StatusFrame
 
-StatusFrame is a lightweight, extension-first public status page framework.
+A self-hosted status page with HTTP, TCP, DNS, and TLS monitoring, running on Cloudflare Workers and D1.
 
-It is not an uptime dashboard. The core rule is:
+Publish service availability, incidents, and maintenance while keeping monitoring targets and diagnostics private.
 
-```text
-Do not publish your infrastructure.
-Publish your service status.
-```
+## Features
 
-The minimal deployment renders a public status page and `/api/status` from static, public-safe component state. Monitoring, incidents, maintenance, metrics, notifications, storage, and admin APIs are optional extensions that use the same interface as third-party extensions.
+- HTTP status/body checks, TCP connectivity, DNS records, and native TLS validation.
+- YAML configuration with persistent check intervals and failure/recovery thresholds.
+- Incident updates and scheduled maintenance.
+- A public status page, read-only APIs, and optional webhook notifications.
 
-## What Is Implemented
+## Deployment
 
-- pnpm monorepo with a Cloudflare Worker app.
-- TypeScript config schema and YAML parser.
-- Public projection and leakage validation.
-- Server-rendered public status page.
-- `/api/status`, `/api/incidents`, and `/api/maintenance` public routes.
-- Extension registry and manifest validation.
-- Core scheduled runner with concurrency and budget enforcement.
-- Static, memory, and D1 storage adapters.
-- Official HTTP and TCP monitor extensions.
-- Scaffolded DNS and TLS monitor extensions.
-- Incident, maintenance, metrics, webhook notification, and admin API extensions.
-- Example YAML configs and focused Vitest coverage.
+### Quick deployment
 
-## Quick Start
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/viasnake/StatusFrame)
 
-```bash
-mise install
-pnpm install
-pnpm validate
-pnpm --filter @statusframe/worker dev
-```
+For evaluation or temporary use. Creates an independent repository copy, Worker, D1 database, and Workers Builds connection. Upstream updates are manual.
 
-Convenience tasks are also available:
+### Long-term deployment
 
-```bash
-mise run install
-mise run validate
-mise run dev
-```
+[Fork this repository](https://github.com/viasnake/StatusFrame/fork) and connect the fork to Cloudflare Workers Builds. Use GitHub **Sync fork → Update branch** to receive upstream updates.
 
-If your shell does not auto-activate mise shims, run commands through `mise exec --`, for example `mise exec -- pnpm validate`.
+Both apply D1 migrations before publishing the Worker. See the [deployment guide](docs/deployment.md) for setup and updates.
 
-The Worker app currently imports `apps/worker/src/statusframe.config.ts`. YAML is supported through `parseStatusFrameYaml` and examples are in `examples/`.
+## Documentation
 
-## Repository Layout
-
-```text
-apps/worker               Cloudflare Worker app
-packages/core             registry, runner, projection, redaction, UI rendering
-packages/schema           Zod schema and YAML parsing
-packages/storage/*        static, memory, and D1 storage adapters
-packages/extensions/*     official extensions
-examples                  YAML configuration examples
-docs                      architecture and operational notes
-```
-
-Start with [Architecture](docs/architecture.md), [Implementation Status](docs/implementation-status.md), and [Security](docs/security.md) when `DESIGN.md` and `goal.md` are no longer present.
-
-## Public Safety
-
-Public routes read public snapshots only. Raw monitor results, target URLs, private IPs, internal hostnames, raw errors, headers, response bodies, webhook URLs, and tokens are not projected. `validatePublicOutput` fails snapshots that contain obvious leakage patterns.
-
-## Cloudflare Worker
-
-The standard runtime is one Worker:
-
-```text
-statusframe Worker
-  -> Core runner
-  -> Extension registry
-  -> Registered extensions
-```
-
-Extensions do not create their own Worker invocation boundary. The scheduled handler delegates to the Core runner, and public requests render or return the latest public snapshot.
+- [Local development](docs/getting-started.md)
+- [Configuration](docs/configuration.md)
+- [Public API](docs/public-api.md)
+- [Runtime costs](docs/runtime-cost.md)
+- [Security](docs/security.md)
+- [Architecture](docs/architecture.md)
