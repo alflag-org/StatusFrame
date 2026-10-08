@@ -219,11 +219,14 @@ describe("D1 scheduler, domains, and notifications", () => {
       } finally { await second.dispose(); }
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
-  it("checkpoints UTC midnight without a due check, extra reads, or a status notification", async () => {
-    const config = makeConfig({ notifications: { webhook: true }, monitors: [{ ...makeConfig().monitors[0], interval: "30d", recovery_threshold: 1 }] });
+  it.each([
+    ["UTC", "2026-01-01T23:00:00Z"],
+    ["Asia/Tokyo", "2026-01-01T14:00:00Z"]
+  ])("checkpoints midnight in %s without a due check, extra reads, or a status notification", async (timezone, startAt) => {
+    const config = makeConfig({ site: { name: "Status", timezone }, notifications: { webhook: true }, monitors: [{ ...makeConfig().monitors[0], interval: "30d", recovery_threshold: 1 }] });
     const notify = vi.fn(async (_event: NotificationEvent) => {});
     const check = vi.fn(async () => ({ ok: true }));
-    const start = now + 23 * 3_600_000;
+    const start = Date.parse(startAt);
     await runner(config, check, notify).runScheduled(start);
     const stored = await db.prepare("SELECT snapshot_json FROM public_snapshot").first();
     const tick = await runner(config, check, notify).runScheduled(start + 3_600_000);
@@ -235,7 +238,7 @@ describe("D1 scheduler, domains, and notifications", () => {
     expect(snapshot.components[0]?.history?.days.at(-1)).toMatchObject({ date: "2026-01-02", known_ms: 3_600_000, uptime_percent: 100 });
   });
   it("persists duration history atomically with outages and prunes it after 90 days", async () => {
-    const config = makeConfig({ monitors: [{ ...makeConfig().monitors[0], recovery_threshold: 1, failure_threshold: 1 }] });
+    const config = makeConfig({ site: { name: "Status", timezone: "UTC" }, monitors: [{ ...makeConfig().monitors[0], recovery_threshold: 1, failure_threshold: 1 }] });
     await runner(config, async () => ({ ok: true })).runScheduled(now);
     await runner(config, async () => ({ ok: false })).runScheduled(now + 3_600_000);
     const snapshot = await runner(config, async () => ({ ok: false })).getSnapshot(now + 2 * 3_600_000);
@@ -251,6 +254,23 @@ describe("D1 scheduler, domains, and notifications", () => {
     expect(history.components[0].days).toHaveLength(89);
     expect(history.components[0].days[0].date).toBe("2026-02-01");
     expect(record!.history_json).not.toContain("website-check");
+  });
+  it("keeps the published timezone until a configured timezone change is checkpointed", async () => {
+    const config = makeConfig({ site: { name: "Status", timezone: "UTC" }, monitors: [{ ...makeConfig().monitors[0], interval: "30d", recovery_threshold: 1 }] });
+    const check = vi.fn(async () => ({ ok: true }));
+    const scheduled = runner(config, check);
+    await scheduled.runScheduled(now);
+    const changed = runner(makeConfig({ ...config, site: { ...config.site, timezone: "Asia/Tokyo" } }), check);
+    const before = await changed.getSnapshot(now + 3_600_000);
+    expect(before.site.timezone).toBe("UTC");
+    expect(before.components[0]?.history?.days.at(-1)?.known_ms).toBe(3_600_000);
+    await changed.runScheduled(now + 3_600_000);
+    const after = await changed.getSnapshot(now + 2 * 3_600_000);
+    expect(after.site.timezone).toBe("Asia/Tokyo");
+    expect(after.components[0]?.history?.days.at(-1)?.known_ms).toBe(3_600_000);
+    expect(check).toHaveBeenCalledOnce();
+    const store = new D1Store(db, new Budget(config.budget));
+    expect((await store.loadPublication()).history?.timezone).toBe("Asia/Tokyo");
   });
   it("does not let a stale scheduler lease publish a snapshot", async () => {
     const config = makeConfig(); const store = new D1Store(db, new Budget(config.budget));

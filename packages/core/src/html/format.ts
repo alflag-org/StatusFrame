@@ -15,19 +15,27 @@ export function escapeHtml(value: string): string {
 
 export function createPageContext(snapshot: PublicSnapshot) {
   const language = snapshot.site.language ?? "en";
-  const text = pageText[language];
   const formatter = new Intl.DateTimeFormat(language, {
     dateStyle: "medium",
     timeStyle: "short",
     timeZone: snapshot.site.timezone
   });
+  const timezone = formatter.resolvedOptions().timeZone;
+  const timezoneLabel = timezone === "Asia/Tokyo" ? "JST" : timezone;
+  const localizedText = pageText[language];
+  const text = {
+    ...localizedText,
+    legend: `${localizedText.legend} · ${timezoneLabel}`,
+    date: language === "ja" ? `${localizedText.date}（${timezoneLabel}）` : `${localizedText.date} (${timezoneLabel})`
+  };
 
   return {
     language,
     text,
+    timezoneLabel,
     renderDate(value: string): string {
       const formatted = formatter.format(new Date(value));
-      return `<time datetime="${escapeHtml(value)}">${escapeHtml(formatted)}</time>`;
+      return `<time datetime="${escapeHtml(value)}">${escapeHtml(formatted)} ${escapeHtml(timezoneLabel)}</time>`;
     },
     formatPercentage(value: number | null): string {
       return value === null ? text.noData : `${value.toFixed(2)}%`;

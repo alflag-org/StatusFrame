@@ -46,13 +46,64 @@ describe("90-day published status history", () => {
     expect(parseHistory(saved)).toEqual(history);
     expect(() => parseHistory(JSON.stringify({ ...history, private_target: "hidden" }))).toThrow();
   });
+  it("splits spans and detects rollover at midnight in the configured timezone", () => {
+    const start = Date.parse("2026-01-01T14:00:00Z");
+    const history = advanceHistory(null, components, start, "Asia/Tokyo");
+    expect(historyNeedsUpdate(history, components, start + 30 * 60_000, "Asia/Tokyo")).toBe(false);
+    expect(historyNeedsUpdate(history, components, start + hour, "Asia/Tokyo")).toBe(true);
+    const days = presentHistory(history, components, start + 2 * hour, "Asia/Tokyo")[0]!.history!.days;
+    expect(days.at(-2)).toMatchObject({ date: "2026-01-01", known_ms: hour });
+    expect(days.at(-1)).toMatchObject({ date: "2026-01-02", known_ms: hour });
+  });
+  it.each([
+    ["America/New_York", "2026-03-08T05:00:00Z", "2026-03-09T04:00:00Z", "2026-03-08", 23],
+    ["America/New_York", "2026-11-01T04:00:00Z", "2026-11-02T05:00:00Z", "2026-11-01", 25],
+    ["Australia/Lord_Howe", "2026-04-04T13:00:00Z", "2026-04-05T13:30:00Z", "2026-04-05", 24.5],
+    ["Asia/Kathmandu", "2026-01-01T18:15:00Z", "2026-01-02T18:15:00Z", "2026-01-02", 24]
+  ] as const)("uses actual calendar-day durations in %s (%s)", (timezone, start, end, date, hours) => {
+    const history = advanceHistory(null, components, Date.parse(start), timezone);
+    const finished = advanceHistory(history, components, Date.parse(end), timezone);
+    expect(parseHistory(JSON.stringify(finished))).toEqual(finished);
+    const config = makeConfig({ site: { name: "Status", timezone } });
+    const snapshot = project(config, [], [], [], Date.parse(end));
+    snapshot.components = presentHistory(finished, components, Date.parse(end), timezone);
+    assertPublic(snapshot, config);
+    const days = snapshot.components[0]!.history!.days;
+    expect(days.at(-2)).toMatchObject({ date, known_ms: hours * hour, uptime_percent: 100 });
+    expect(days.at(-1)?.known_ms).toBe(0);
+    expect(days).toHaveLength(90);
+    expect(new Set(days.map(day => day.date)).size).toBe(90);
+  });
+  it("retains 90 local dates across daylight saving transitions", () => {
+    const start = Date.parse("2026-01-01T05:00:00Z");
+    const end = Date.parse("2026-04-01T04:00:00Z");
+    const history = advanceHistory(null, components, start, "America/New_York");
+    const result = presentHistory(history, components, end, "America/New_York")[0]!.history!;
+    expect(result.days[0]?.date).toBe("2026-01-02");
+    expect(result.days.at(-1)?.date).toBe("2026-04-01");
+    expect(result.days.find(day => day.date === "2026-03-08")?.known_ms).toBe(23 * hour);
+    expect(result.uptime_percent).toBe(100);
+  });
+  it("preserves legacy UTC totals and starts new history when the timezone changes", () => {
+    const recorded = advanceHistory(advanceHistory(null, components, now), components, now + hour);
+    const { timezone: _timezone, ...legacy } = recorded;
+    const history = parseHistory(JSON.stringify(legacy));
+    expect(history.timezone).toBe("UTC");
+    expect(presentHistory(history, components, now + 2 * hour)[0]!.history!.uptime_percent).toBe(100);
+    const before = JSON.stringify(history);
+    expect(historyNeedsUpdate(history, components, now + hour, "Asia/Tokyo")).toBe(true);
+    const reset = advanceHistory(history, components, now + hour, "Asia/Tokyo");
+    expect(reset.components[0]?.days).toEqual([]);
+    expect(presentHistory(reset, components, now + 2 * hour, "Asia/Tokyo")[0]!.history!.days.at(-1)?.known_ms).toBe(hour);
+    expect(JSON.stringify(history)).toBe(before);
+  });
 });
 
 describe("status page", () => {
   it("renders localized status, accessible daily data and escaped operator text", () => {
     const config = makeConfig({ site: { name: "Status <script>", language: "ja", timezone: "Asia/Tokyo" } });
     const snapshot = project(config, [], [], [], now);
-    snapshot.components = presentHistory(null, snapshot.components, now);
+    snapshot.components = presentHistory(null, snapshot.components, now, config.site.timezone);
     assertPublic(snapshot, config);
     const html = renderStatusPage(snapshot);
     expect(html).toContain('lang="ja"');
@@ -61,7 +112,11 @@ describe("status page", () => {
     expect(html).toContain("サービス");
     expect(html).toContain("データなし");
     expect(html).not.toContain("100.00%");
-    expect(html).toContain('<th scope="col">日付（UTC）</th>');
+    expect(html).toContain('<th scope="col">日付（JST）</th>');
+    expect(html).toContain("2026/01/02 8:00 JST");
+    expect(html).toContain("2026-01-02 JST");
+    expect(html).not.toContain("UTC");
+    expect(html).not.toContain("稼働率について");
     expect(html).toContain('href="#maintenance"');
     expect((html.match(/class="history-day /g) ?? [])).toHaveLength(90);
     expect(html).not.toContain("website-check");
@@ -100,6 +155,10 @@ describe("status page", () => {
     expect(html).not.toContain("<table>");
     expect(html).not.toContain("<script");
     expect(html).not.toContain('<link');
+    expect(html).not.toContain("history-note");
+    expect(html).not.toContain("About uptime");
+    expect(html).not.toContain("稼働率について");
+    expect(html).toContain("UTC</time>");
   });
   it("displays daily rows newest first without reordering the supplied history", () => {
     const config = makeConfig();
@@ -111,5 +170,19 @@ describe("status page", () => {
     const rows = [...html.matchAll(/<th scope="row">([^<]+)<\/th>/g)].map(match => match[1]);
     expect(rows).toEqual([...days].reverse().map(day => day.date));
     expect(JSON.stringify(snapshot)).toBe(before);
+  });
+  it("uses UTC by default for event dates and history", () => {
+    const config = makeConfig({ site: { name: "Status" }, incidents: [{
+      id: "active", title: "Disruption", status: "investigating", impact: "degraded", components: ["web"],
+      started_at: new Date(now).toISOString(), updates: [{ status: "investigating", body: "Investigating", created_at: new Date(now).toISOString() }]
+    }] });
+    expect(config.site.timezone).toBe("UTC");
+    const snapshot = project(config, [], config.incidents, [], now);
+    snapshot.components = presentHistory(null, snapshot.components, now, config.site.timezone);
+    const html = renderStatusPage(snapshot);
+    expect(html).toContain("Jan 1, 2026, 11:00 PM UTC</time>");
+    expect(html).toContain("90 days · UTC");
+    expect(html).toContain("Date (UTC)");
+    expect(html).not.toContain("JST");
   });
 });

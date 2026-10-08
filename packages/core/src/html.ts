@@ -14,7 +14,7 @@ function renderStatusBanner(site: PublicSnapshot["site"], context: PageContext):
     <span class="banner-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></span>
     <div>
       <h1 id="status-title">${text.banner[site.status]}</h1>
-      <p>${text.updated}: ${renderDate(site.updated_at)} · ${escapeHtml(site.timezone)}</p>
+      <p>${text.updated}: ${renderDate(site.updated_at)}</p>
     </div>
   </section>`;
 }
@@ -28,7 +28,6 @@ function renderServices(components: PublicSnapshot["components"], context: PageC
     <h2 id="services-title">${text.services}</h2>
     ${components.map(component => renderComponent(component, context)).join("")}
     <div class="legend muted"><span>${text.legend}</span>${legend}</div>
-    <details class="daily-details history-note"><summary>${text.methodology}</summary><p>${text.note}</p></details>
   </section>`;
 }
 

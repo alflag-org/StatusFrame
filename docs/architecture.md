@@ -14,7 +14,7 @@ StatusFrame runs in a single Cloudflare Worker with fetch and scheduled handlers
 - `apps/worker/src/index.ts` wires runtime bindings and routes requests to the HTML page or JSON responses.
 - `packages/core/src/runner.ts` coordinates scheduled work: admission, lease acquisition, rereading state, sequential checks, atomic publication, and notification delivery. `runner-plan.ts` handles configuration hashes, restoration of monitor state, and merging configured domain records into the public view without I/O.
 - `packages/core/src/projection.ts` selects public fields, computes component status, validates public data, and derives notification events.
-- `packages/core/src/storage.ts` owns D1 queries, guarded statement preparation, and batch commits. `history.ts` splits published-state spans into UTC days and computes the 90-day public history.
+- `packages/core/src/storage.ts` owns D1 queries, guarded statement preparation, and batch commits. `history.ts` splits published-state spans into calendar days in the configured site timezone and computes the 90-day public history. `history-calendar.ts` determines date boundaries, including timezone transitions.
 - `packages/core/src/html.ts` composes the page. Its `html/` directory contains `messages.ts` for Japanese/English text, `styles.ts` for embedded CSS, `format.ts` for escaping and display formatting, `components.ts` for service history, and `events.ts` for incident and maintenance cards. CSS stays inline; these source modules require no browser scripts, asset requests, or custom build loaders.
 
 ## Scheduled execution
@@ -58,7 +58,7 @@ Notifications are created only by snapshot/domain changes after the initial base
 
 ## Status history
 
-Migration `0002_status_history.sql` adds nullable `history_json` to the existing public snapshot table. The column stores duration counters for each of the five public states in daily UTC buckets, bounded to 90 calendar days per configured public component. A checkpoint records the component states and the start of the open span. State changes and UTC day boundaries close spans into their daily buckets, prune old buckets, and save history atomically with the snapshot under the same scheduler lease. Removed components are dropped on the next checkpoint.
+Migration `0002_status_history.sql` adds nullable `history_json` to the existing public snapshot table. The column stores duration counters for each of the five public states in daily buckets, bounded to 90 calendar days per configured public component. History includes its aggregation timezone, defaulting to UTC when reading legacy records. A checkpoint records the component states and the start of the open span. State changes and local day boundaries close spans into their daily buckets, prune old buckets, and save history atomically with the snapshot under the same scheduler lease. Changing the aggregation timezone discards old daily totals and starts recording at that checkpoint; closed daily totals cannot be accurately split into different calendar days. Removed components are dropped on the next checkpoint.
 
 Public reads load snapshot and history together in one SELECT, validate stored data, and extend the open span in memory. They return 90 daily entries and time-weighted uptime per component. No history is reconstructed before the first checkpoint. Uptime excludes unknown time and assumes a published state persists until its next transition; it is an estimate of published status, not raw probe availability. Maintenance does not pause monitoring.
 

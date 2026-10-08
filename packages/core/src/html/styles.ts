@@ -317,15 +317,6 @@ h3 {
   font-weight:400;
 }
 
-.history-note {
-  font-size:12px;
-  max-width:820px;
-}
-
-.history-note p {
-  margin-top:8px;
-}
-
 .daily-details {
   font-size:12px;
   color:var(--muted);

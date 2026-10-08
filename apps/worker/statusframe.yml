@@ -1,7 +1,7 @@
 site:
   name: Example Status
   language: ja
-  timezone: Asia/Tokyo
+  timezone: UTC
 components:
   - id: web
     name: Web
