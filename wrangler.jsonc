@@ -11,7 +11,6 @@
   "d1_databases": [{
     "binding": "STATUSFRAME_DB",
     "database_name": "statusframe",
-    "database_id": "00000000-0000-0000-0000-000000000000",
     "migrations_dir": "apps/worker/migrations"
   }]
 }

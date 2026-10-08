@@ -23,7 +23,7 @@ For evaluation or temporary use. Creates an independent repository copy, Worker,
 
 [Fork this repository](https://github.com/viasnake/StatusFrame/fork) and connect the fork to Cloudflare Workers Builds. Use GitHub **Sync fork → Update branch** to receive upstream updates.
 
-Both apply D1 migrations before publishing the Worker. See the [deployment guide](docs/deployment.md) for setup and updates.
+Both apply D1 migrations before publishing the Worker. No database ID needs to be copied into configuration. See the [deployment guide](docs/deployment.md) for setup and updates.
 
 ## Documentation
 

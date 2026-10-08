@@ -9,7 +9,7 @@ Both use `pnpm build` and `pnpm run deploy`. Deployment applies D1 migrations be
 1. Open [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/viasnake/StatusFrame) and connect your GitHub and Cloudflare accounts.
 2. Choose the repository, Worker, and database names. Cloudflare copies the complete repository and provisions the Worker and D1 binding `STATUSFRAME_DB`.
 3. Use the repository root as the application path. Set the build command to `pnpm build` and deploy command to `pnpm run deploy`.
-4. Start deployment and check that migrations finish before the Worker is published. Confirm that the copied `wrangler.jsonc` contains the provisioned database ID in place of the placeholder.
+4. Start deployment and check that migrations finish before the Worker is published. No database ID editing is required.
 5. Set the production branch to the copied repository's default branch and disable preview builds. Then configure and verify the installation below.
 
 This creates an independent copy, not a GitHub fork. GitHub **Sync fork** is unavailable; upstream updates must be brought into the copy manually.
@@ -17,10 +17,9 @@ This creates an independent copy, not a GitHub fork. GitHub **Sync fork** is una
 ## Long-term deployment
 
 1. [Fork StatusFrame](https://github.com/viasnake/StatusFrame/fork) on GitHub, keeping the default branch, `master`.
-2. In your Cloudflare account, create a fresh D1 database named `statusframe`. Replace the all-zero `database_id` in the fork's root `wrangler.jsonc` with its ID. If you choose another database name, also update `database_name`; keep the binding `STATUSFRAME_DB`.
-3. Configure your public services and monitoring targets in `apps/worker/statusframe.yml` and commit the changes to your fork.
-4. In **Workers & Pages**, create an application with GitHub and select your existing fork from the repository list.
-5. Configure the build:
+2. In your Cloudflare account, create a fresh D1 database named `statusframe` before starting the first build. This matches the included `database_name`; no ID needs to be copied into the repository.
+3. In **Workers & Pages**, create an application with GitHub and select your existing fork from the repository list.
+4. Configure the build:
 
    | Field | Value |
    | --- | --- |
@@ -32,9 +31,11 @@ This creates an independent copy, not a GitHub fork. GitHub **Sync fork** is una
    | Preview builds | Off |
    | API token | Token offered by the import flow, with Worker deployment and D1 edit access |
 
-6. Deploy. Check the migration result and then verify the installation below.
+5. Deploy with the included example configuration. Check the migration result, then configure your own services and verify the installation below.
 
-The database must exist and have its real ID configured before the first build: the deploy command runs remote migrations before Worker publication. Preview builds require a separate database and configuration; `preview_urls: false` alone does not disable build triggers.
+The database must exist before the first build because remote migrations run before Worker publication. Wrangler resolves `STATUSFRAME_DB` using `database_name`; `database_id` can remain omitted on subsequent builds and fresh checkouts. If an explicit ID is configured, Wrangler uses it instead. Use the Wrangler version installed from this repository's lockfile, which supports remote migrations without a configured ID.
+
+Preview builds require a separate database and configuration; `preview_urls: false` alone does not disable build triggers.
 
 Node.js is selected by `.node-version`, and pnpm by `packageManager` in `package.json`. If you override tool versions in [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/), use the same versions.
 
@@ -71,14 +72,14 @@ From the repository root, install dependencies as described in [Getting started]
 
 ```sh
 pnpm exec wrangler login
-pnpm exec wrangler d1 create statusframe
+pnpm exec wrangler d1 create statusframe --no-update-config
 ```
 
-Put the returned database ID in root `wrangler.jsonc`, configure your services, and run:
+Database creation is needed only once. Keep `wrangler.jsonc` unchanged and run:
 
 ```sh
 pnpm build
 pnpm run deploy
 ```
 
-Use a new database for this schema; there is no migration from older StatusFrame installations.
+Then configure your services as described above and use the same build and deploy commands for updates. Use a new database for this schema; there is no migration from older StatusFrame installations.
