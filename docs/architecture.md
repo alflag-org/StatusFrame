@@ -32,7 +32,7 @@ The pipeline is private runtime → explicit public field selection → strict p
 
 An active incident may worsen the result to its declared impact. Site severity is operational < unknown < degraded < partial_outage < major_outage. Maintenance is published separately and does not hide failures.
 
-Projection contains no monitor objects or diagnostic hints. The snapshot is persisted only when public content changes; `site.updated_at` is the last content-change time. Public fetches only read it and never perform monitoring or save fallback snapshots.
+Projection contains no monitor objects or diagnostic hints. The snapshot is persisted when public content changes or its history checkpoint needs updating. `site.updated_at` remains the last content-change time, including across history-only writes. Public fetches only read it and never perform monitoring or save fallback snapshots.
 
 ## Domains and delivery
 
@@ -47,3 +47,9 @@ Notifications are created only by snapshot/domain changes after the initial base
 `pnpm test:integration` checks D1 transactions, lease ownership, persistence across process restart, Worker routes, and runtime fetch compatibility using local workerd. These tests retain the real database/runtime contracts rather than implementing a mock SQL engine. Deployment tests substitute CLI commands to check migration failure and publish ordering without contacting Cloudflare.
 
 `pnpm build` runs type checking and unit tests. `pnpm validate` adds integration tests and a Wrangler deployment dry run. Native TLS certificate verification and the hosted Deploy Button flow are platform behavior; the suites do not contact live targets or create remote resources.
+
+## Status history
+
+Migration `0002_status_history.sql` adds nullable `history_json` to the existing public snapshot table. The column stores duration counters for each of the five public states in daily UTC buckets, bounded to 90 calendar days per configured public component. A checkpoint records the component states and the start of the open span. State changes and UTC day boundaries close spans into their daily buckets, prune old buckets, and save history atomically with the snapshot under the same scheduler lease. Removed components are dropped on the next checkpoint.
+
+Public reads load snapshot and history together in one SELECT, validate stored data, and extend the open span in memory. They return 90 daily entries and time-weighted uptime per component. No history is reconstructed before the first checkpoint. Uptime excludes unknown time and assumes a published state persists until its next transition; it is an estimate of published status, not raw probe availability. Maintenance does not pause monitoring.

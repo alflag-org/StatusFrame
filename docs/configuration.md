@@ -94,3 +94,9 @@ Nonterminal entries follow their dates: before start they are scheduled, during 
 `notifications.webhook: true` enables delivery using `STATUSFRAME_WEBHOOK_URL` and optional `STATUSFRAME_WEBHOOK_SECRET` bindings. YAML never contains webhook URLs or secrets. Failed deliveries are not retried; budget-deferred events remain in the D1 outbox. See [Runtime costs](runtime-cost.md).
 
 Configuration allows up to 100 components, 100 monitors, 50 incident declarations, and 50 maintenance declarations. These are validation limits, not guaranteed capacity on a Free account. Budgets must accommodate a domain change transaction; publish large batches in smaller changes if necessary.
+
+## Status history
+
+The status API returns 90 daily history entries and estimated uptime per service. History buckets use UTC calendar days. History begins with the first scheduled run after the history migration; earlier dates show no data. Daily status shows the worst published state during the day. Uptime is normal duration divided by known duration, excluding unknown and pre-recording time. Maintenance and active incident impact remain part of published status.
+
+History retention is fixed at the current UTC day plus the preceding 89 days. Daily counters are overwritten/checkpointed in a bounded JSON record, rather than adding every check result. Incidents and maintenance still have no automatic retention limit, and public lists remain bounded to 50 each.

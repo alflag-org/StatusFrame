@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Budget, D1Store, createRunner, project, type Config, type RunMonitor, type NotificationEvent, type Incident } from "@statusframe/core";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeConfig, makeIO } from "../helpers";
@@ -49,10 +49,13 @@ describe("D1 scheduler, domains, and notifications", () => {
     const config = makeConfig({ monitors: [{ ...makeConfig().monitors[0], recovery_threshold: 1 }] });
     const check = vi.fn(async () => ({ ok: true }));
     await runner(config, check).runScheduled(now);
-    const before = await runner(config, check).getSnapshot();
+    const before = await runner(config, check).getSnapshot(now);
+    const savedBefore = await db.prepare("SELECT snapshot_json, history_json FROM public_snapshot").first();
     const second = await runner(config, check).runScheduled(now + 300_000);
-    const after = await runner(config, check).getSnapshot();
-    expect(after).toEqual(before); expect(second.usage.d1_writes).toBe(3); // acquire, runtime row, release
+    const after = await runner(config, check).getSnapshot(now + 300_000);
+    expect(after.site).toEqual(before.site); expect(second.usage.d1_writes).toBe(3);
+    expect(after.components[0]?.history?.days.at(-1)?.known_ms).toBe(300_000);
+    expect(await db.prepare("SELECT snapshot_json, history_json FROM public_snapshot").first()).toEqual(savedBefore); // acquire, runtime row, release
     expect((await row())?.last_checked_at).toBe(now + 300_000);
   });
   it("suppresses repeated notifications and emits one per actual component transition", async () => {
@@ -180,10 +183,63 @@ describe("D1 scheduler, domains, and notifications", () => {
       } finally { await second.dispose(); }
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
+  it("checkpoints UTC midnight without a due check, extra reads, or a status notification", async () => {
+    const config = makeConfig({ notifications: { webhook: true }, monitors: [{ ...makeConfig().monitors[0], interval: "30d", recovery_threshold: 1 }] });
+    const notify = vi.fn(async (_event: NotificationEvent) => {});
+    const check = vi.fn(async () => ({ ok: true }));
+    const start = now + 23 * 3_600_000;
+    await runner(config, check, notify).runScheduled(start);
+    const stored = await db.prepare("SELECT snapshot_json FROM public_snapshot").first();
+    const tick = await runner(config, check, notify).runScheduled(start + 3_600_000);
+    expect(check).toHaveBeenCalledOnce(); expect(notify).not.toHaveBeenCalled();
+    expect(tick.usage).toMatchObject({ d1_reads: 9, d1_writes: 3 });
+    expect(await db.prepare("SELECT snapshot_json FROM public_snapshot").first()).toEqual(stored);
+    const snapshot = await runner(config, check).getSnapshot(start + 2 * 3_600_000);
+    expect(snapshot.components[0]?.history?.days.at(-2)).toMatchObject({ date: "2026-01-01", known_ms: 3_600_000, uptime_percent: 100 });
+    expect(snapshot.components[0]?.history?.days.at(-1)).toMatchObject({ date: "2026-01-02", known_ms: 3_600_000, uptime_percent: 100 });
+  });
+  it("persists duration history atomically with outages and prunes it after 90 days", async () => {
+    const config = makeConfig({ monitors: [{ ...makeConfig().monitors[0], recovery_threshold: 1, failure_threshold: 1 }] });
+    await runner(config, async () => ({ ok: true })).runScheduled(now);
+    await runner(config, async () => ({ ok: false })).runScheduled(now + 3_600_000);
+    const snapshot = await runner(config, async () => ({ ok: false })).getSnapshot(now + 2 * 3_600_000);
+    expect(snapshot.components[0]?.status).toBe("major_outage");
+    expect(snapshot.components[0]?.history?.uptime_percent).toBe(50);
+    expect(snapshot.components[0]?.history?.days.at(-1)).toMatchObject({ known_ms: 2 * 3_600_000, status: "major_outage" });
+    const saved = await db.prepare("SELECT history_json FROM public_snapshot").first();
+    await runner(config, async () => ({ ok: false })).getSnapshot(now + 4 * 3_600_000);
+    expect(await db.prepare("SELECT history_json FROM public_snapshot").first()).toEqual(saved);
+    await runner(config, async () => ({ ok: true })).runScheduled(now + 120 * 86_400_000);
+    const record = await db.prepare("SELECT history_json FROM public_snapshot").first<{ history_json: string }>();
+    const history = JSON.parse(record!.history_json);
+    expect(history.components[0].days).toHaveLength(89);
+    expect(history.components[0].days[0].date).toBe("2026-02-01");
+    expect(record!.history_json).not.toContain("website-check");
+  });
   it("does not let a stale scheduler lease publish a snapshot", async () => {
     const config = makeConfig(); const store = new D1Store(db, new Budget(config.budget));
     await store.acquire("old-owner", 0); await store.acquire("new-owner", 120_001);
     await expect(store.commit("old-owner", { monitors: [], incidents: [], maintenance: [], events: [], snapshot: project(config, [], [], [], 0) }, 120_001)).rejects.toThrow("lease expired");
     expect(await store.loadSnapshot()).toBeNull();
+  });
+});
+
+
+
+describe("history migration", () => {
+  it("preserves an existing snapshot and starts without backfilled history", async () => {
+    const { db, dispose } = await database(undefined, false);
+    try {
+      const initial = await readFile("apps/worker/migrations/0001_initial.sql", "utf8");
+      await db.batch(initial.split(";").map(v => v.trim()).filter(Boolean).map(v => db.prepare(v)));
+      const config = makeConfig();
+      const snapshot = project(config, [], [], [], now);
+      await db.prepare("INSERT INTO public_snapshot(id, snapshot_json) VALUES(1, ?)").bind(JSON.stringify(snapshot)).run();
+      await db.prepare(await readFile("apps/worker/migrations/0002_status_history.sql", "utf8")).run();
+      const store = new D1Store(db, new Budget(config.budget));
+      expect(await store.loadPublication()).toEqual({ snapshot, history: null });
+      const publicSnapshot = await createRunner({ config, db, io: makeIO(), runMonitor: async () => ({ ok: true }) }).getSnapshot(now);
+      expect(publicSnapshot.components[0]?.history?.uptime_percent).toBeNull();
+    } finally { await dispose(); }
   });
 });

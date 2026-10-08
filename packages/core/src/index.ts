@@ -6,3 +6,4 @@ export * from "./projection";
 export * from "./storage";
 export * from "./runner";
 export * from "./html";
+export * from "./history";

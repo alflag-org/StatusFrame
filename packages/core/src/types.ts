@@ -10,7 +10,11 @@ export interface MonitorRuntime {
   consecutive_successes: number;
 }
 export interface MonitorResult { ok: boolean; error_code?: string }
-export interface PublicComponent { id: string; name: string; description?: string; status: PublicState }
+export interface PublicHistory {
+  days: Array<{ date: string; status: PublicState; known_ms: number; uptime_percent: number | null }>;
+  uptime_percent: number | null;
+}
+export interface PublicComponent { id: string; name: string; description?: string; status: PublicState; history?: PublicHistory }
 export interface PublicIncident {
   id: string; title: string; status: Incident["status"]; impact: Incident["impact"];
   components: string[]; started_at: string; resolved_at: string | null;
@@ -53,6 +57,7 @@ export interface StoredView {
   incidents: Incident[];
   maintenance: Maintenance[];
   snapshot: PublicSnapshot | null;
+  history: import("./history").HistoryState | null;
 }
 export interface TickResult {
   checked: string[]; skipped: string[]; notified: number;

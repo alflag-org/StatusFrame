@@ -4,9 +4,11 @@ Cron runs every minute. An unchanged tick with no due monitors performs four bou
 
 ## Write policy
 
-A successful due tick writes one scheduler lease acquisition, one runtime row per executed monitor, and one lease release. Runtime rows are necessary for restart-safe intervals and consecutive-result counters. The public snapshot writes only when visible content changes. Domain records write only when changed. Notifications add one outbox row per transition and one conditional deletion per delivery attempt. Removed monitors are deleted in one statement during reconciliation.
+A successful due tick writes one scheduler lease acquisition, one runtime row per executed monitor, and one lease release. Runtime rows are necessary for restart-safe intervals and consecutive-result counters. The public snapshot writes when visible content changes, published component states change, or UTC day rollover checkpoints history. History and the snapshot share one row and one write. Domain records write only when changed. Notifications add one outbox row per transition and one conditional deletion per delivery attempt. Removed monitors are deleted in one statement during reconciliation.
 
-There are no component-state copies, monitor-result history, uptime buckets, or latency/SLA time series. The runtime table holds only the current state of configured monitors.
+The runtime table holds only the current state of configured monitors. A separate JSON column on the singleton public snapshot row holds up to 90 UTC calendar days of duration counters per public component, plus the current state and checkpoint time. It adds no read queries. Repeated same-state checks add no history writes within a day. History is checkpointed on state changes and UTC day rollover; old days and removed components are dropped at the next checkpoint. Public reads extend the current span in memory without writes.
+
+There is no per-check result log or latency/SLA time series. Uptime is an estimate from published states, including configured failure/recovery thresholds and active incident impact. The last published state is assumed to continue until its next transition, including scheduler interruptions; this is not independent evidence of availability during unobserved periods. Unknown time and time before recording began are excluded from the uptime denominator. Maintenance does not pause monitoring or exclude downtime.
 
 ## Budgets
 

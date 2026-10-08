@@ -63,7 +63,7 @@ The signature is a hex HMAC-SHA256 of the exact JSON body in `x-statusframe-sign
 
 For a long-term deployment, open the fork's production branch and choose **Sync fork → Update branch**. Review conflicts with your configuration changes. The updated branch triggers the same build, migration, and deployment sequence.
 
-For a Quick deployment copy, merge upstream changes manually and push the reviewed result to the production branch. Both paths retain D1 data; use new migrations for schema changes rather than replacing an applied migration.
+For a Quick deployment copy, merge upstream changes manually and push the reviewed result to the production branch. Both paths retain D1 data; use new migrations for schema changes rather than replacing an applied migration. The `0002_status_history.sql` migration adds history storage without deleting existing records. Apply it before publishing the updated Worker; history begins at the first scheduled checkpoint and older dates remain unknown.
 
 ## Command-line deployment
 

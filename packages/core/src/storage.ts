@@ -1,5 +1,6 @@
 import { Budget } from "./budget";
 import { incidentSchema, maintenanceSchema } from "./config";
+import { parseHistory, type HistoryState } from "./history";
 import type { Incident, Maintenance } from "./config";
 import type { MonitorRuntime, NotificationEvent, PublicSnapshot, StoredView } from "./types";
 
@@ -8,6 +9,7 @@ export interface Commit {
   incidents: Incident[];
   maintenance: Maintenance[];
   snapshot: PublicSnapshot | null;
+  history?: HistoryState;
   events: NotificationEvent[];
   remove_monitor_ids?: string[];
 }
@@ -24,8 +26,12 @@ export class D1Store {
     return this.db.batch(statements);
   }
   async loadSnapshot(): Promise<PublicSnapshot | null> {
-    const [row] = await this.read<{ snapshot_json: string }>("SELECT snapshot_json FROM public_snapshot WHERE id = 1");
-    return row ? JSON.parse(row.snapshot_json) as PublicSnapshot : null;
+    return (await this.loadPublication()).snapshot;
+  }
+  async loadPublication(): Promise<{ snapshot: PublicSnapshot | null; history: HistoryState | null }> {
+    const [row] = await this.read<{ snapshot_json: string; history_json: string | null }>("SELECT snapshot_json, history_json FROM public_snapshot WHERE id = 1");
+    return { snapshot: row ? JSON.parse(row.snapshot_json) as PublicSnapshot : null,
+      history: row?.history_json ? parseHistory(row.history_json) : null };
   }
   async loadView(incidentIds: string[] = [], maintenanceIds: string[] = []): Promise<StoredView> {
     const monitors = await this.read<MonitorRuntime>("SELECT * FROM monitor_runtime");
@@ -40,9 +46,9 @@ export class D1Store {
       UNION SELECT id, record_json FROM (SELECT id, record_json FROM maintenance WHERE status IN ('completed', 'cancelled') ORDER BY starts_at DESC LIMIT 50)
       UNION SELECT id, record_json FROM maintenance WHERE id IN (SELECT value FROM json_each(?))
     )`, [JSON.stringify(maintenanceIds)]);
-    const snapshot = await this.loadSnapshot();
+    const { snapshot, history } = await this.loadPublication();
     return { monitors, incidents: incidentRows.map(v => incidentSchema.parse(JSON.parse(v.record_json))),
-      maintenance: maintenanceRows.map(v => maintenanceSchema.parse(JSON.parse(v.record_json))), snapshot };
+      maintenance: maintenanceRows.map(v => maintenanceSchema.parse(JSON.parse(v.record_json))), snapshot, history };
   }
   async acquire(owner: string, now: number): Promise<boolean> {
     const [result] = await this.write([this.db.prepare("UPDATE scheduler_lock SET owner = ?, expires_at = ? WHERE id = 1 AND expires_at <= ?").bind(owner, now + 120_000, now)]);
@@ -67,9 +73,10 @@ export class D1Store {
     for (const v of changes.maintenance) statements.push(this.db.prepare(`INSERT INTO maintenance (id, starts_at, status, record_json)
       SELECT ?, ?, ?, ? WHERE ${guard} ON CONFLICT(id) DO UPDATE SET starts_at = excluded.starts_at, status = excluded.status, record_json = excluded.record_json`)
       .bind(v.id, v.starts_at, v.status, JSON.stringify(v), owner, wallNow));
-    if (changes.snapshot) statements.push(this.db.prepare(`INSERT INTO public_snapshot (id, snapshot_json)
-      SELECT 1, ? WHERE ${guard} ON CONFLICT(id) DO UPDATE SET snapshot_json = excluded.snapshot_json`)
-      .bind(JSON.stringify(changes.snapshot), owner, wallNow));
+    if (changes.snapshot) statements.push(this.db.prepare(`INSERT INTO public_snapshot (id, snapshot_json, history_json)
+      SELECT 1, ?, ? WHERE ${guard} ON CONFLICT(id) DO UPDATE SET snapshot_json = excluded.snapshot_json,
+      history_json = COALESCE(excluded.history_json, public_snapshot.history_json)`)
+      .bind(JSON.stringify(changes.snapshot), changes.history ? JSON.stringify(changes.history) : null, owner, wallNow));
     for (const v of changes.events) statements.push(this.db.prepare(`INSERT INTO notification_outbox (id, created_at, event_json)
       SELECT ?, ?, ? WHERE ${guard}`).bind(v.id, v.created_at, JSON.stringify(v), owner, wallNow));
     if (changes.remove_monitor_ids?.length) statements.push(this.db.prepare(`DELETE FROM monitor_runtime

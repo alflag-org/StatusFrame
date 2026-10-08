@@ -39,7 +39,10 @@ export function project(config: Config, states: MonitorRuntime[], incidents: Inc
 }
 const publicSchema = z.object({
   site: z.object({ name: publicTextSchema, description: publicTextSchema.optional(), timezone: z.string(), status: z.enum(publicStates), updated_at: z.iso.datetime() }).strict(),
-  components: z.array(z.object({ id: idSchema, name: publicTextSchema, description: publicTextSchema.optional(), status: z.enum(publicStates) }).strict()),
+  components: z.array(z.object({ id: idSchema, name: publicTextSchema, description: publicTextSchema.optional(), status: z.enum(publicStates),
+    history: z.object({ days: z.array(z.object({ date: z.iso.date(), status: z.enum(publicStates), known_ms: z.number().int().min(0).max(86_400_000),
+      uptime_percent: z.number().min(0).max(100).nullable() }).strict()).length(90), uptime_percent: z.number().min(0).max(100).nullable() }).strict().optional()
+  }).strict()),
   incidents: z.array(incidentSchema), maintenance: z.array(maintenanceSchema)
 }).strict();
 export function assertPublic(snapshot: unknown, config: Config, secrets: string[] = []): asserts snapshot is PublicSnapshot {

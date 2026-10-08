@@ -3,6 +3,7 @@ import { durationMs, type Config, type Incident, type Maintenance } from "./conf
 import { assertPublic, effectiveMaintenance, project, sameContent, transitionEvents } from "./projection";
 import { D1Store, type Commit } from "./storage";
 import { advanceState, initialState } from "./state";
+import { advanceHistory, historyNeedsUpdate, presentHistory } from "./history";
 import type { MonitorRuntime, NotificationEvent, RunMonitor, RuntimeIO, StoredView, TickResult } from "./types";
 
 export interface RunnerOptions {
@@ -34,9 +35,12 @@ export function createRunner(options: RunnerOptions) {
   return {
     async getSnapshot(now = Date.now()) {
       const store = new D1Store(options.db, new Budget(config.budget));
-      const snapshot = await store.loadSnapshot() ?? project(config, [], [], [], now);
+      const publication = await store.loadPublication();
+      const snapshot = publication.snapshot ?? project(config, [], [], [], now);
       assertPublic(snapshot, config, options.secrets);
-      return snapshot;
+      const publicSnapshot = { ...snapshot, components: presentHistory(publication.history, snapshot.components, now) };
+      assertPublic(publicSnapshot, config, options.secrets);
+      return publicSnapshot;
     },
     async runScheduled(now = Date.now()): Promise<TickResult> {
       const budget = new Budget(config.budget);
@@ -61,7 +65,7 @@ export function createRunner(options: RunnerOptions) {
       const visibleChange = !sameContent(view.snapshot, next.snapshot);
       const domainChange = next.incidents.some(v => JSON.stringify(view.incidents.find(old => old.id === v.id)) !== JSON.stringify(v)) ||
         next.maintenance.some(v => JSON.stringify(view.maintenance.find(old => old.id === v.id)) !== JSON.stringify(v));
-      if (due.length || visibleChange || domainChange || view.monitors.some(v => !hashes.has(v.monitor_id))) {
+      if (due.length || visibleChange || domainChange || historyNeedsUpdate(view.history, next.snapshot.components, now) || view.monitors.some(v => !hashes.has(v.monitor_id))) {
         // Reserve room for the second read, lease release, and at least one snapshot write.
         if (!budget.can({ d1_reads: 4, d1_writes: 3, subrequests: 7 })) {
           result.skipped.push(...due.map(v => v.monitor_id));
@@ -108,6 +112,11 @@ export function createRunner(options: RunnerOptions) {
           if (!sameContent(view.snapshot, next.snapshot)) {
             changes.snapshot = next.snapshot;
             if (config.notifications.webhook) changes.events = transitionEvents(view.snapshot, next.snapshot);
+          }
+          if (historyNeedsUpdate(view.history, next.snapshot.components, now)) {
+            changes.history = advanceHistory(view.history, next.snapshot.components, now);
+            // Day rollover updates history without changing the last public status-change time.
+            changes.snapshot ??= view.snapshot ?? next.snapshot;
           }
           await store.commit(owner, changes, Date.now());
         } catch (error) {
