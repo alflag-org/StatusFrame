@@ -76,4 +76,40 @@ describe("status page", () => {
     expect(html.indexOf("Current disruption")).toBeLessThan(html.indexOf('id="services"'));
     expect(html.indexOf("Previous disruption")).toBeGreaterThan(html.indexOf('id="incidents"'));
   });
+  it.each(["en", "ja"] as const)("keeps maintenance groups and missing-history bars in %s", language => {
+    const config = makeConfig({ site: { name: "Status", language, timezone: "UTC" } });
+    const snapshot = project(config, [], [], [], now);
+    snapshot.maintenance = (["scheduled", "in_progress", "completed", "cancelled"] as const).map(status => ({
+      id: status.replace("_", "-"),
+      title: `${status} <&>`,
+      status,
+      components: ["web"],
+      starts_at: new Date(now).toISOString(),
+      ends_at: new Date(now + hour).toISOString(),
+      body: "First line\nSecond line <script>"
+    }));
+    const html = renderStatusPage(snapshot);
+    const pastSection = html.indexOf('class="past-maintenance"');
+    expect(html.indexOf("scheduled &lt;&amp;&gt;")).toBeLessThan(pastSection);
+    expect(html.indexOf("in_progress &lt;&amp;&gt;")).toBeLessThan(pastSection);
+    expect(html.indexOf("completed &lt;&amp;&gt;")).toBeGreaterThan(pastSection);
+    expect(html.indexOf("cancelled &lt;&amp;&gt;")).toBeGreaterThan(pastSection);
+    expect(html).toContain("First line\nSecond line &lt;script&gt;");
+    expect(html).toContain(language === "ja" ? "対象: Web" : "Affected services: Web");
+    expect((html.match(/class="history-day unknown"/g) ?? [])).toHaveLength(90);
+    expect(html).not.toContain("<table>");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain('<link');
+  });
+  it("displays daily rows newest first without reordering the supplied history", () => {
+    const config = makeConfig();
+    const snapshot = project(config, [], [], [], now);
+    snapshot.components = presentHistory(null, snapshot.components, now);
+    const before = JSON.stringify(snapshot);
+    const days = snapshot.components[0]!.history!.days;
+    const html = renderStatusPage(snapshot);
+    const rows = [...html.matchAll(/<th scope="row">([^<]+)<\/th>/g)].map(match => match[1]);
+    expect(rows).toEqual([...days].reverse().map(day => day.date));
+    expect(JSON.stringify(snapshot)).toBe(before);
+  });
 });

@@ -113,6 +113,42 @@ describe("D1 scheduler, domains, and notifications", () => {
     const first = await runner(config, check).runScheduled(now); expect(first.checked).toHaveLength(1); expect(first.skipped).toHaveLength(1);
     const second = await runner(config, check).runScheduled(now + 60_000); expect(second.checked).toEqual(first.skipped);
   });
+  it("preserves exact operation costs for baseline, idle, unchanged, and notification ticks", async () => {
+    const config = makeConfig({
+      notifications: { webhook: true },
+      monitors: [{ ...makeConfig().monitors[0], recovery_threshold: 1, failure_threshold: 1 }]
+    });
+    let ok = true;
+    const check: RunMonitor = async (_monitor, context) => {
+      context.budget.take({ subrequests: 1 });
+      return { ok };
+    };
+    const notify = vi.fn(async (_event: NotificationEvent) => {});
+    const scheduled = runner(config, check, notify);
+
+    const baseline = await scheduled.runScheduled(now);
+    expect(baseline.usage).toEqual({
+      d1_reads: 9, d1_writes: 4, subrequests: 14, notifications: 0, due_jobs: 1
+    });
+    const idle = await scheduled.runScheduled(now + 60_000);
+    expect(idle.usage).toEqual({
+      d1_reads: 5, d1_writes: 0, subrequests: 5, notifications: 0, due_jobs: 0
+    });
+    const unchanged = await scheduled.runScheduled(now + 300_000);
+    expect(unchanged.usage).toEqual({
+      d1_reads: 9, d1_writes: 3, subrequests: 13, notifications: 0, due_jobs: 1
+    });
+    ok = false;
+    const transition = await scheduled.runScheduled(now + 600_000);
+    expect(transition.usage).toEqual({
+      d1_reads: 9, d1_writes: 6, subrequests: 17, notifications: 1, due_jobs: 1
+    });
+    expect(transition.notified).toBe(1);
+    expect(notify).toHaveBeenCalledOnce();
+    expect(notify.mock.calls[0]?.[0]).toMatchObject({
+      type: "component_status_changed", previous_status: "operational", status: "major_outage"
+    });
+  });
   it("admits TLS checks using the cost of one native secure connection", async () => {
     const config = makeConfig({ budget: { max_subrequests: 13 }, monitors: [
       { id: "certificate-check", component: "web", type: "tls", host: "tls.example.com", recovery_threshold: 1 }

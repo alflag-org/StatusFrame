@@ -9,6 +9,14 @@ StatusFrame runs in a single Cloudflare Worker with fetch and scheduled handlers
 - `packages/monitors`: implements four concrete checks. Only the external fetch/socket I/O is supplied at the runtime boundary.
 - `packages/notifications`: implements signed HTTPS webhook delivery.
 
+## Reading the implementation
+
+- `apps/worker/src/index.ts` wires runtime bindings and routes requests to the HTML page or JSON responses.
+- `packages/core/src/runner.ts` coordinates scheduled work: admission, lease acquisition, rereading state, sequential checks, atomic publication, and notification delivery. `runner-plan.ts` handles configuration hashes, restoration of monitor state, and merging configured domain records into the public view without I/O.
+- `packages/core/src/projection.ts` selects public fields, computes component status, validates public data, and derives notification events.
+- `packages/core/src/storage.ts` owns D1 queries, guarded statement preparation, and batch commits. `history.ts` splits published-state spans into UTC days and computes the 90-day public history.
+- `packages/core/src/html.ts` composes the page. Its `html/` directory contains `messages.ts` for Japanese/English text, `styles.ts` for embedded CSS, `format.ts` for escaping and display formatting, `components.ts` for service history, and `events.ts` for incident and maintenance cards. CSS stays inline; these source modules require no browser scripts, asset requests, or custom build loaders.
+
 ## Scheduled execution
 
 The runner reads persisted monitor runtime, bounded incident/maintenance records, and the previous public snapshot. Monitor runtime contains its private ID, configuration hash, last check, next due time, internal state, and saturated consecutive-result counters.
