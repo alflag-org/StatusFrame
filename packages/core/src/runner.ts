@@ -36,7 +36,7 @@ export function createRunner(options: RunnerOptions) {
 
       const publicSnapshot = {
         ...snapshot,
-        components: presentHistory(publication.history, snapshot.components, now)
+        components: presentHistory(publication.history, snapshot.components, now, snapshot.site.timezone)
       };
       assertPublic(publicSnapshot, config, options.secrets);
       return publicSnapshot;
@@ -65,7 +65,7 @@ async function runScheduled(options: RunnerOptions, now: number): Promise<TickRe
   const hasDomainChange = changedRecords(view.incidents, projected.incidents).length > 0 ||
     changedRecords(view.maintenance, projected.maintenance).length > 0;
   const hasRemovedMonitors = view.monitors.some(state => !monitorHashes.has(state.monitor_id));
-  const needsHistoryCheckpoint = historyNeedsUpdate(view.history, projected.snapshot.components, now);
+  const needsHistoryCheckpoint = historyNeedsUpdate(view.history, projected.snapshot.components, now, config.site.timezone);
 
   if (due.length || hasPublicChange || hasDomainChange || needsHistoryCheckpoint || hasRemovedMonitors) {
     // Reserve room for the second read, lease release, and at least one snapshot write.
@@ -121,8 +121,8 @@ async function commitScheduledChanges(context: ScheduledContext, owner: string, 
     changes.snapshot = projected.snapshot;
     if (config.notifications.webhook) changes.events = transitionEvents(view.snapshot, projected.snapshot);
   }
-  if (historyNeedsUpdate(view.history, projected.snapshot.components, now)) {
-    changes.history = advanceHistory(view.history, projected.snapshot.components, now);
+  if (historyNeedsUpdate(view.history, projected.snapshot.components, now, config.site.timezone)) {
+    changes.history = advanceHistory(view.history, projected.snapshot.components, now, config.site.timezone);
     // Day rollover updates history without changing the last public status-change time.
     changes.snapshot ??= view.snapshot ?? projected.snapshot;
   }

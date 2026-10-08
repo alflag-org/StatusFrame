@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, incidentSchema, maintenanceSchema, publicStates, publicTextSchema, type Config, type Incident, type Maintenance, type PublicState } from "./config";
 import type { MonitorRuntime, NotificationEvent, PublicIncident, PublicMaintenance, PublicSnapshot } from "./types";
+import { maxHistoryDayMs } from "./history-calendar";
 
 const rank: Record<PublicState, number> = {
   operational: 0, unknown: 1, degraded: 2, partial_outage: 3, major_outage: 4
@@ -95,7 +96,7 @@ const publicHistorySchema = z.object({
   days: z.array(z.object({
     date: z.iso.date(),
     status: z.enum(publicStates),
-    known_ms: z.number().int().min(0).max(86_400_000),
+    known_ms: z.number().int().min(0).max(maxHistoryDayMs),
     uptime_percent: z.number().min(0).max(100).nullable()
   }).strict()).length(90),
   uptime_percent: z.number().min(0).max(100).nullable()

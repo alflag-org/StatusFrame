@@ -6,7 +6,7 @@ type HistoryDay = PublicHistory["days"][number];
 function renderHistoryBar(day: HistoryDay, context: PageContext): string {
   const { text, formatPercentage } = context;
   const status = day.known_ms ? text.states[day.status] : text.noData;
-  const title = `${day.date} · ${status} · ${text.uptime} ${formatPercentage(day.uptime_percent)}`;
+  const title = `${day.date} ${context.timezoneLabel} · ${status} · ${text.uptime} ${formatPercentage(day.uptime_percent)}`;
   return `<span class="history-day ${day.status}" title="${escapeHtml(title)}"></span>`;
 }
 
