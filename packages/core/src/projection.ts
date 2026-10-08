@@ -29,7 +29,7 @@ export function project(config: Config, states: MonitorRuntime[], incidents: Inc
   });
   return {
     site: { name: config.site.name, ...(config.site.description ? { description: config.site.description } : {}),
-      timezone: config.site.timezone, status: worst(components.map(v => v.status)), updated_at: new Date(now).toISOString() },
+      timezone: config.site.timezone, language: config.site.language, status: worst(components.map(v => v.status)), updated_at: new Date(now).toISOString() },
     components, incidents: publicIncidents,
     maintenance: maintenance.map(entry => {
       const v = effectiveMaintenance(entry, now);
@@ -38,7 +38,7 @@ export function project(config: Config, states: MonitorRuntime[], incidents: Inc
   };
 }
 const publicSchema = z.object({
-  site: z.object({ name: publicTextSchema, description: publicTextSchema.optional(), timezone: z.string(), status: z.enum(publicStates), updated_at: z.iso.datetime() }).strict(),
+  site: z.object({ name: publicTextSchema, description: publicTextSchema.optional(), timezone: z.string(), language: z.enum(["en", "ja"]).optional(), status: z.enum(publicStates), updated_at: z.iso.datetime() }).strict(),
   components: z.array(z.object({ id: idSchema, name: publicTextSchema, description: publicTextSchema.optional(), status: z.enum(publicStates),
     history: z.object({ days: z.array(z.object({ date: z.iso.date(), status: z.enum(publicStates), known_ms: z.number().int().min(0).max(86_400_000),
       uptime_percent: z.number().min(0).max(100).nullable() }).strict()).length(90), uptime_percent: z.number().min(0).max(100).nullable() }).strict().optional()

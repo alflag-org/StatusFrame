@@ -9,7 +9,7 @@ Publish service availability, incidents, and maintenance while keeping monitorin
 - HTTP status/body checks, TCP connectivity, DNS records, and native TLS validation.
 - YAML configuration with persistent check intervals and failure/recovery thresholds.
 - Incident updates and scheduled maintenance.
-- A public status page, read-only APIs with 90-day status history and estimated uptime, and optional webhook notifications.
+- A Japanese/English public status page with 90-day daily status history and estimated uptime, read-only APIs, and optional webhook notifications.
 
 ## Deployment
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { advanceHistory, historyNeedsUpdate, parseHistory, presentHistory, type PublicComponent } from "@statusframe/core";
+import { advanceHistory, historyNeedsUpdate, parseHistory, presentHistory, project, renderStatusPage, assertPublic, type PublicComponent } from "@statusframe/core";
+import { makeConfig } from "../helpers";
 const hour = 3_600_000;
 const now = Date.parse("2026-01-01T23:00:00Z");
 const components: PublicComponent[] = [{ id: "web", name: "Web", status: "operational" }];
@@ -44,5 +45,35 @@ describe("90-day published status history", () => {
     expect(JSON.stringify(history)).toBe(saved);
     expect(parseHistory(saved)).toEqual(history);
     expect(() => parseHistory(JSON.stringify({ ...history, private_target: "hidden" }))).toThrow();
+  });
+});
+
+describe("status page", () => {
+  it("renders localized status, accessible daily data and escaped operator text", () => {
+    const config = makeConfig({ site: { name: "Status <script>", language: "ja", timezone: "Asia/Tokyo" } });
+    const snapshot = project(config, [], [], [], now);
+    snapshot.components = presentHistory(null, snapshot.components, now);
+    assertPublic(snapshot, config);
+    const html = renderStatusPage(snapshot);
+    expect(html).toContain('lang="ja"');
+    expect(html).toContain("Status &lt;script&gt;");
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("サービス");
+    expect(html).toContain("データなし");
+    expect(html).not.toContain("100.00%");
+    expect(html).toContain('<th scope="col">日付（UTC）</th>');
+    expect(html).toContain('href="#maintenance"');
+    expect((html.match(/class="history-day /g) ?? [])).toHaveLength(90);
+    expect(html).not.toContain("website-check");
+  });
+  it("renders English and separates active incidents from resolved history", () => {
+    const config = makeConfig({ incidents: [
+      { id: "active", title: "Current disruption", status: "investigating", impact: "degraded", components: ["web"], started_at: new Date(now).toISOString() },
+      { id: "past", title: "Previous disruption", status: "resolved", impact: "degraded", components: ["web"], started_at: new Date(now - hour).toISOString(), resolved_at: new Date(now).toISOString() }
+    ] });
+    const html = renderStatusPage(project(config, [], config.incidents, [], now));
+    expect(html).toContain('lang="en"');
+    expect(html.indexOf("Current disruption")).toBeLessThan(html.indexOf('id="services"'));
+    expect(html.indexOf("Previous disruption")).toBeGreaterThan(html.indexOf('id="incidents"'));
   });
 });

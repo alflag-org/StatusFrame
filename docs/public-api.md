@@ -13,7 +13,7 @@ All routes accept GET and HEAD. Other methods return 405; unknown routes, includ
 }
 ```
 
-Site/component description fields appear only when configured. Each returned component also includes `history`, described below. Public states are operational, degraded, partial_outage, major_outage, and unknown. `updated_at` records the last public content change, not every monitoring check. Before initial publication, the unknown fallback uses the request time.
+Site/component description fields appear only when configured. `site.language` is `en` or `ja` on new snapshots; older stored snapshots may omit it until their next publication. Each returned component also includes `history`, described below. Public states are operational, degraded, partial_outage, major_outage, and unknown. `updated_at` records the last public content change, not every monitoring check. Before initial publication, the unknown fallback uses the request time.
 
 Incidents contain id, title, status, impact, component IDs, started_at, nullable resolved_at, and updates. Each update contains status, body, and created_at. Maintenance contains id, title, status, component IDs, starts_at, ends_at, and body. Lists are bounded to 50 entries each, prioritizing active entries before recent history.
 
@@ -27,7 +27,7 @@ Returns `{ "maintenance": [...] }` from the same snapshot, including completed/c
 
 ## GET /
 
-Renders component availability, incident updates/history, and maintenance. Operator prose is HTML-escaped. Times are displayed using the configured timezone. The page has no client monitoring logic, third-party assets, raw checks, or uptime/latency graphs.
+Renders component availability, incident updates/history, and maintenance. Operator prose is HTML-escaped. Times are displayed using the configured timezone. The page includes a localized status banner, service cards with 90-day status bars and uptime, active incidents, maintenance, and resolved incident history. Each history chart has an expandable daily table. There is no client monitoring logic, third-party asset, raw check log, or latency graph.
 
 ## Publication contract
 

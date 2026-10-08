@@ -25,7 +25,7 @@ export interface PublicMaintenance {
   starts_at: string; ends_at: string; body: string;
 }
 export interface PublicSnapshot {
-  site: { name: string; description?: string; timezone: string; status: PublicState; updated_at: string };
+  site: { name: string; description?: string; timezone: string; language?: "en" | "ja"; status: PublicState; updated_at: string };
   components: PublicComponent[];
   incidents: PublicIncident[];
   maintenance: PublicMaintenance[];

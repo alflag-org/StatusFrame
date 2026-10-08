@@ -91,7 +91,7 @@ const limits = {
   max_due_jobs: z.number().int().min(0).max(40).default(10)
 };
 export const configSchema = z.object({
-  site: z.object({ name: publicTextSchema, description: publicTextSchema.optional(), timezone: z.string().default("UTC").refine(v => { try { new Intl.DateTimeFormat("en", { timeZone: v }); return true; } catch { return false; } }) }).strict(),
+  site: z.object({ name: publicTextSchema, description: publicTextSchema.optional(), language: z.enum(["en", "ja"]).default("en"), timezone: z.string().default("UTC").refine(v => { try { new Intl.DateTimeFormat("en", { timeZone: v }); return true; } catch { return false; } }) }).strict(),
   components: z.array(z.object({ id: idSchema, name: publicTextSchema, description: publicTextSchema.optional() }).strict()).min(1).max(100),
   monitors: z.array(monitorSchema).max(100).default([]),
   incidents: z.array(incidentSchema).max(50).default([]),

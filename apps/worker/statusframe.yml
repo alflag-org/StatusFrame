@@ -1,5 +1,6 @@
 site:
   name: Example Status
+  language: ja
   timezone: Asia/Tokyo
 components:
   - id: web
