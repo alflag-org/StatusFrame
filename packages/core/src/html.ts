@@ -23,11 +23,12 @@ function renderServices(components: PublicSnapshot["components"], context: PageC
   const { text, renderStatusBadge } = context;
   const legend = (["operational", "degraded", "partial_outage", "major_outage", "unknown"] as const)
     .map(renderStatusBadge).join("");
+  const hasHistory = components.some(component => component.history?.days.some(day => day.known_ms > 0));
 
   return `<section class="section" id="services" aria-labelledby="services-title">
     <h2 id="services-title">${text.services}</h2>
     ${components.map(component => renderComponent(component, context)).join("")}
-    <div class="legend muted"><span>${text.legend}</span>${legend}</div>
+    ${hasHistory ? `<div class="legend muted"><span>${text.legend}</span>${legend}</div>` : ""}
   </section>`;
 }
 
@@ -74,7 +75,6 @@ export function renderStatusPage(snapshot: PublicSnapshot): string {
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="#status"><span class="brand-mark" aria-hidden="true"></span>${escapeHtml(site.name)}</a>
-      <nav aria-label="${text.subtitle}"><a href="#services">${text.services}</a><a href="#maintenance">${text.maintenance}</a><a href="#incidents">${text.incidents}</a></nav>
     </div>
   </header>
   <main class="container">

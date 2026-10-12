@@ -110,18 +110,17 @@ describe("status page", () => {
     expect(html).toContain("Status &lt;script&gt;");
     expect(html).not.toContain("<script>");
     expect(html).toContain("サービス");
-    expect(html).toContain("データなし");
+    expect(html).toContain("履歴はまだありません");
     expect(html).not.toContain("100.00%");
-    expect(html).toContain('role="img" aria-label="Web · 90日間 · JST · 稼働率 データなし"');
+    expect(html).not.toContain('role="img"');
     expect(html).toContain("最終チェック: 未チェック");
     expect(html).not.toContain("日別履歴");
     expect(html).not.toContain("<table>");
     expect(html).toContain("2026/01/02 8:00 JST");
-    expect(html).toContain("2026-01-02 JST");
     expect(html).not.toContain("UTC");
     expect(html).not.toContain("稼働率について");
-    expect(html).toContain('href="#maintenance"');
-    expect((html.match(/class="history-day /g) ?? [])).toHaveLength(90);
+    expect(html).not.toContain("<nav");
+    expect((html.match(/class="history-day /g) ?? [])).toHaveLength(0);
     expect(html).not.toContain("website-check");
   });
   it("renders English and separates active incidents from resolved history", () => {
@@ -134,7 +133,7 @@ describe("status page", () => {
     expect(html.indexOf("Current disruption")).toBeLessThan(html.indexOf('id="services"'));
     expect(html.indexOf("Previous disruption")).toBeGreaterThan(html.indexOf('id="incidents"'));
   });
-  it.each(["en", "ja"] as const)("keeps maintenance groups and missing-history bars in %s", language => {
+  it.each(["en", "ja"] as const)("keeps maintenance groups without placeholder history in %s", language => {
     const config = makeConfig({ site: { name: "Status", language, timezone: "UTC" } });
     const snapshot = project(config, [], [], [], now);
     snapshot.maintenance = (["scheduled", "in_progress", "completed", "cancelled"] as const).map(status => ({
@@ -154,7 +153,10 @@ describe("status page", () => {
     expect(html.indexOf("cancelled &lt;&amp;&gt;")).toBeGreaterThan(pastSection);
     expect(html).toContain("First line\nSecond line &lt;script&gt;");
     expect(html).toContain(language === "ja" ? "対象: Web" : "Affected services: Web");
-    expect((html.match(/class="history-day unknown"/g) ?? [])).toHaveLength(90);
+    expect((html.match(/class="history-day /g) ?? [])).toHaveLength(0);
+    expect(html).toContain(language === "ja" ? "履歴はまだありません" : "No history yet");
+    expect(html).not.toContain('<span class="uptime ');
+    expect(html).not.toContain('<div class="legend ');
     expect(html).not.toContain("<table>");
     expect(html).not.toContain("<script");
     expect(html).not.toContain('<link');
@@ -176,15 +178,25 @@ describe("status page", () => {
     expect(html).toContain('<time datetime="2026-01-01T22:59:37.000Z">');
     expect(html).toContain(language === "ja" ? "2026/01/02 7:59:37 JST" : "Jan 2, 2026, 7:59:37 AM JST");
   });
-  it("retains chronological bars without a daily table or mutating history", () => {
+  it("trims unrecorded leading dates but keeps later gaps without mutating history", () => {
     const config = makeConfig();
     const snapshot = project(config, [], [], [], now);
-    snapshot.components = presentHistory(null, snapshot.components, now);
-    const before = JSON.stringify(snapshot);
+    snapshot.components = presentHistory(null, snapshot.components, now, config.site.timezone);
     const days = snapshot.components[0]!.history!.days;
+    days.at(-5)!.known_ms = hour;
+    days.at(-5)!.status = "operational";
+    days.at(-5)!.uptime_percent = 100;
+    days.at(-3)!.known_ms = hour;
+    days.at(-3)!.status = "major_outage";
+    days.at(-3)!.uptime_percent = 0;
+    snapshot.components[0]!.history!.uptime_percent = 50;
+    const before = JSON.stringify(snapshot);
     const html = renderStatusPage(snapshot);
     const dates = [...html.matchAll(/class="history-day [^"]+" title="(\d{4}-\d{2}-\d{2})/g)].map(match => match[1]);
-    expect(dates).toEqual(days.map(day => day.date));
+    expect(dates).toEqual(days.slice(-5).map(day => day.date));
+    expect((html.match(/class="history-day unknown"/g) ?? [])).toHaveLength(3);
+    expect(html).toContain(`${days.at(-5)!.date} — ${days.at(-1)!.date} JST`);
+    expect(html).toContain('role="img" aria-label="Web · Status history · JST · Uptime 50.00%"');
     expect(html).not.toContain("<table>");
     expect(html).not.toContain("Daily history");
     expect(JSON.stringify(snapshot)).toBe(before);
@@ -209,10 +221,11 @@ describe("status page", () => {
     }] });
     expect(config.site.timezone).toBe("UTC");
     const snapshot = project(config, [], config.incidents, [], now);
-    snapshot.components = presentHistory(null, snapshot.components, now, config.site.timezone);
+    const recorded = advanceHistory(null, snapshot.components, now - hour, config.site.timezone);
+    snapshot.components = presentHistory(recorded, snapshot.components, now, config.site.timezone);
     const html = renderStatusPage(snapshot);
     expect(html).toContain("Jan 1, 2026, 11:00 PM UTC</time>");
-    expect(html).toContain("90 days · UTC");
+    expect(html).toContain("Status history · UTC");
     expect(html).toContain("2026-01-01 UTC");
     expect(html).not.toContain("JST");
   });

@@ -49,10 +49,6 @@ a:focus-visible,summary:focus-visible {
   max-width:1040px;
   margin:auto;
   padding:22px 28px;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:24px;
 }
 
 .brand {
@@ -91,20 +87,6 @@ a:focus-visible,summary:focus-visible {
   right:0;
   bottom:0;
   opacity:.85;
-}
-
-nav {
-  display:flex;
-  gap:24px;
-  font-size:13px;
-}
-
-nav a {
-  text-decoration:none;
-}
-
-nav a:hover {
-  color:var(--green);
 }
 
 .container {
@@ -147,9 +129,37 @@ h3 {
 }
 
 .banner.operational {
-  background:#eaf8f1;
-  border-color:#d4eee1;
-  color:#096944;
+  padding:0;
+  gap:10px;
+  align-items:flex-start;
+  background:transparent;
+  border:0;
+  color:var(--ink);
+}
+
+.banner.operational h1 {
+  font-size:18px;
+  font-weight:600;
+  letter-spacing:0;
+}
+
+.banner.operational p {
+  margin-top:4px;
+  color:var(--muted);
+  font-size:12px;
+}
+
+.banner.operational .banner-icon {
+  width:20px;
+  height:20px;
+  margin-top:3px;
+  background:none;
+}
+
+.banner.operational .banner-icon svg {
+  width:20px;
+  height:20px;
+  color:var(--green);
 }
 
 .banner.degraded,.banner.partial_outage {
@@ -292,9 +302,10 @@ h3 {
 
 .history-bars {
   display:flex;
+  width:min(100%,calc(var(--history-days) * 10px));
   gap:3px;
-  height:29px;
-  margin-top:22px;
+  height:22px;
+  margin-top:18px;
 }
 
 .history-day {
@@ -325,9 +336,6 @@ h3 {
 }
 
 .history-scale {
-  display:flex;
-  justify-content:space-between;
-  gap:8px;
   font-size:12px;
   margin-top:8px;
 }
@@ -460,15 +468,9 @@ footer {
 @media(max-width:640px) {
   .topbar-inner {
     padding:18px;
-    flex-wrap:wrap;
-    gap:12px;
   }
   .brand {
     font-size:20px;
-  }
-  nav {
-    gap:18px;
-    font-size:12px;
   }
   .container {
     padding:22px 16px 0;
@@ -497,7 +499,6 @@ footer {
   }
   .history-bars {
     gap:2px;
-    height:25px;
   }
   .history-scale {
     font-size:11px;
@@ -525,11 +526,6 @@ footer {
     --red:#f47e8d;
     --blue:#7bb5ed;
     --unknown:#a9b6c1;
-  }
-  .banner.operational {
-    background:#123c2d;
-    border-color:#235641;
-    color:#9ee7c0;
   }
   .banner.degraded,.banner.partial_outage {
     background:#403119;
