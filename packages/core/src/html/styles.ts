@@ -215,6 +215,39 @@ h3 {
   gap:20px;
 }
 
+.component-summary {
+  min-width:0;
+}
+
+.component-title {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:12px;
+}
+
+.uptime {
+  font-size:18px;
+  font-weight:750;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+
+.uptime-period {
+  margin-top:4px;
+  font-size:12px;
+}
+
+.last-check {
+  margin-top:14px;
+  font-size:13px;
+}
+
+.last-check time {
+  color:var(--ink);
+  font-variant-numeric:tabular-nums;
+}
+
 .description {
   margin-top:6px;
   font-size:14px;
@@ -299,10 +332,6 @@ h3 {
   margin-top:8px;
 }
 
-.history-scale strong {
-  font-weight:500;
-}
-
 .legend {
   display:flex;
   flex-wrap:wrap;
@@ -314,40 +343,6 @@ h3 {
 
 .legend .status {
   font-size:12px;
-  font-weight:400;
-}
-
-.daily-details {
-  font-size:12px;
-  color:var(--muted);
-  margin-top:12px;
-}
-
-.daily-details summary {
-  cursor:pointer;
-  width:fit-content;
-}
-
-.table-scroll {
-  max-height:260px;
-  overflow:auto;
-  margin-top:10px;
-}
-
-table {
-  width:100%;
-  border-collapse:collapse;
-  text-align:left;
-}
-
-caption {
-  text-align:left;
-  padding:8px 0;
-}
-
-th,td {
-  border-bottom:1px solid var(--border);
-  padding:6px;
   font-weight:400;
 }
 

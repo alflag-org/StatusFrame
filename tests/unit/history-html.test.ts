@@ -100,7 +100,7 @@ describe("90-day published status history", () => {
 });
 
 describe("status page", () => {
-  it("renders localized status, accessible daily data and escaped operator text", () => {
+  it("renders localized status, labeled history bars and escaped operator text", () => {
     const config = makeConfig({ site: { name: "Status <script>", language: "ja", timezone: "Asia/Tokyo" } });
     const snapshot = project(config, [], [], [], now);
     snapshot.components = presentHistory(null, snapshot.components, now, config.site.timezone);
@@ -112,7 +112,10 @@ describe("status page", () => {
     expect(html).toContain("サービス");
     expect(html).toContain("データなし");
     expect(html).not.toContain("100.00%");
-    expect(html).toContain('<th scope="col">日付（JST）</th>');
+    expect(html).toContain('role="img" aria-label="Web · 90日間 · JST · 稼働率 データなし"');
+    expect(html).toContain("最終チェック: 未チェック");
+    expect(html).not.toContain("日別履歴");
+    expect(html).not.toContain("<table>");
     expect(html).toContain("2026/01/02 8:00 JST");
     expect(html).toContain("2026-01-02 JST");
     expect(html).not.toContain("UTC");
@@ -160,16 +163,44 @@ describe("status page", () => {
     expect(html).not.toContain("稼働率について");
     expect(html).toContain("UTC</time>");
   });
-  it("displays daily rows newest first without reordering the supplied history", () => {
+  it.each(["en", "ja"] as const)("shows uptime beside the service name and an actual check time in %s", language => {
+    const config = makeConfig({ site: { name: "Status", language, timezone: "Asia/Tokyo" } });
+    const snapshot = project(config, [], [], [], now);
+    snapshot.components[0]!.last_checked_at = "2026-01-01T22:59:37.000Z";
+    const history = advanceHistory(null, [{ ...snapshot.components[0]!, status: "operational" }], now - hour, config.site.timezone);
+    snapshot.components = presentHistory(history, snapshot.components, now, config.site.timezone);
+    const html = renderStatusPage(snapshot);
+    expect(html).toContain('>100.00%</span><h3>Web</h3>');
+    expect(html).toContain(language === "ja" ? "稼働率 · 過去90日間" : "Uptime · Past 90 days");
+    expect(html).toContain(language === "ja" ? "最終チェック:" : "Last checked:");
+    expect(html).toContain('<time datetime="2026-01-01T22:59:37.000Z">');
+    expect(html).toContain(language === "ja" ? "2026/01/02 7:59:37 JST" : "Jan 2, 2026, 7:59:37 AM JST");
+  });
+  it("retains chronological bars without a daily table or mutating history", () => {
     const config = makeConfig();
     const snapshot = project(config, [], [], [], now);
     snapshot.components = presentHistory(null, snapshot.components, now);
     const before = JSON.stringify(snapshot);
     const days = snapshot.components[0]!.history!.days;
     const html = renderStatusPage(snapshot);
-    const rows = [...html.matchAll(/<th scope="row">([^<]+)<\/th>/g)].map(match => match[1]);
-    expect(rows).toEqual([...days].reverse().map(day => day.date));
+    const dates = [...html.matchAll(/class="history-day [^"]+" title="(\d{4}-\d{2}-\d{2})/g)].map(match => match[1]);
+    expect(dates).toEqual(days.map(day => day.date));
+    expect(html).not.toContain("<table>");
+    expect(html).not.toContain("Daily history");
     expect(JSON.stringify(snapshot)).toBe(before);
+  });
+  it("does not substitute the status-change time for a missing legacy check time", () => {
+    const snapshot = project(makeConfig(), [], [], [], now);
+    delete snapshot.components[0]!.last_checked_at;
+    expect(renderStatusPage(snapshot)).toContain("Last checked: Not checked yet");
+  });
+  it("renders zero uptime as a percentage rather than missing data", () => {
+    const config = makeConfig();
+    const snapshot = project(config, [], [], [], now);
+    snapshot.components[0]!.status = "major_outage";
+    const history = advanceHistory(null, snapshot.components, now - hour, config.site.timezone);
+    snapshot.components = presentHistory(history, snapshot.components, now, config.site.timezone);
+    expect(renderStatusPage(snapshot)).toContain('>0.00%</span><h3>Web</h3>');
   });
   it("uses UTC by default for event dates and history", () => {
     const config = makeConfig({ site: { name: "Status" }, incidents: [{
@@ -182,7 +213,7 @@ describe("status page", () => {
     const html = renderStatusPage(snapshot);
     expect(html).toContain("Jan 1, 2026, 11:00 PM UTC</time>");
     expect(html).toContain("90 days · UTC");
-    expect(html).toContain("Date (UTC)");
+    expect(html).toContain("2026-01-01 UTC");
     expect(html).not.toContain("JST");
   });
 });

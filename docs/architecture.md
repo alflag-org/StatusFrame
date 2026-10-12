@@ -40,7 +40,7 @@ The pipeline is private runtime → explicit public field selection → strict p
 
 An active incident may worsen the result to its declared impact. Site severity is operational < unknown < degraded < partial_outage < major_outage. Maintenance is published separately and does not hide failures.
 
-Projection contains no monitor objects or diagnostic hints. The snapshot is persisted when public content changes or its history checkpoint needs updating. `site.updated_at` remains the last content-change time, including across history-only writes. Public fetches only read it and never perform monitoring or save fallback snapshots.
+Projection contains no monitor objects or diagnostic hints. Each component exposes only the oldest last-check time among its configured monitors, or null until all have been checked. The snapshot is persisted when public content or component check times change, or its history checkpoint needs updating. `site.updated_at` remains the last content-change time, including across check-time and history-only writes. Check-time updates do not produce notifications. Public fetches only read it and never perform monitoring or save fallback snapshots.
 
 ## Domains and delivery
 
@@ -62,4 +62,4 @@ Migration `0002_status_history.sql` adds nullable `history_json` to the existing
 
 Public reads load snapshot and history together in one SELECT, validate stored data, and extend the open span in memory. They return 90 daily entries and time-weighted uptime per component. No history is reconstructed before the first checkpoint. Uptime excludes unknown time and assumes a published state persists until its next transition; it is an estimate of published status, not raw probe availability. Maintenance does not pause monitoring.
 
-The status page uses server-rendered HTML and inline CSS with no scripts or external assets. `site.language` chooses Japanese or English labels; operator-authored text is preserved. Daily bars and an expandable table expose the same history, with unknown time and missing history shown in gray. Incident sections separate active records from resolved history.
+The status page uses server-rendered HTML and inline CSS with no scripts or external assets. `site.language` chooses Japanese or English labels; operator-authored text is preserved. Each service displays its 90-day uptime percentage beside its name, daily bars with history tooltips, and the last check time with seconds and timezone. Unknown time and missing history appear as gray bars; missing uptime displays "No data". Incident sections separate active records from resolved history.

@@ -10,29 +10,8 @@ function renderHistoryBar(day: HistoryDay, context: PageContext): string {
   return `<span class="history-day ${day.status}" title="${escapeHtml(title)}"></span>`;
 }
 
-function renderDailyHistory(name: string, days: HistoryDay[], context: PageContext): string {
-  if (!days.length) return "";
-
-  const { text, formatPercentage } = context;
-  const rows = [...days].reverse().map(day => {
-    const status = day.known_ms ? text.states[day.status] : text.noData;
-    return `<tr><th scope="row">${day.date}</th><td>${status}</td><td>${formatPercentage(day.uptime_percent)}</td></tr>`;
-  }).join("");
-
-  return `<details class="daily-details">
-    <summary>${text.details}</summary>
-    <div class="table-scroll">
-      <table>
-        <caption>${escapeHtml(name)} · ${text.legend}</caption>
-        <thead><tr><th scope="col">${text.date}</th><th scope="col">${text.status}</th><th scope="col">${text.uptime}</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-  </details>`;
-}
-
 export function renderComponent(component: PublicComponent, context: PageContext): string {
-  const { text, formatPercentage, renderStatusBadge } = context;
+  const { text, formatPercentage, renderStatusBadge, renderCheckDate } = context;
   const days = component.history?.days ?? [];
   const bars: HistoryDay[] = days.length ? days : Array.from({ length: 90 }, () => ({
     date: "", status: "unknown", known_ms: 0, uptime_percent: null
@@ -45,13 +24,17 @@ export function renderComponent(component: PublicComponent, context: PageContext
 
   return `<article class="card component">
     <div class="component-heading">
-      <div><h3>${escapeHtml(component.name)}</h3>${description}</div>
+      <div class="component-summary">
+        <div class="component-title"><span class="uptime ${component.status}">${uptime}</span><h3>${escapeHtml(component.name)}</h3></div>
+        <p class="uptime-period muted">${text.uptime} · ${text.period}</p>
+        ${description}
+      </div>
       ${renderStatusBadge(component.status)}
     </div>
     <div class="history-bars" role="img" aria-label="${escapeHtml(historyLabel)}">${bars.map(day => renderHistoryBar(day, context)).join("")}</div>
     <div class="history-scale muted">
-      <span>${text.firstDay}</span><span>${text.uptime} <strong>${uptime}</strong></span><span>${text.today}</span>
+      <span>${text.firstDay}</span><span>${text.today}</span>
     </div>
-    ${renderDailyHistory(component.name, days, context)}
+    <p class="last-check muted">${text.lastChecked}: ${component.last_checked_at ? renderCheckDate(component.last_checked_at) : text.notChecked}</p>
   </article>`;
 }

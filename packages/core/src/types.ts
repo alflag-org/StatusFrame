@@ -30,6 +30,7 @@ export interface PublicComponent {
   name: string;
   description?: string;
   status: PublicState;
+  last_checked_at?: string | null;
   history?: PublicHistory;
 }
 
