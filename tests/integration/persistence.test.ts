@@ -40,23 +40,29 @@ describe("D1 scheduler, domains, and notifications", () => {
     const check = vi.fn(async () => ({ ok: true }));
     await runner(config, check).runScheduled(now);
     expect((await runner(config, check).runScheduled(now + 60_000)).checked).toEqual(["one-minute"]);
+    expect((await runner(config, check).getSnapshot(now + 60_000)).components[0]?.last_checked_at).toBe(new Date(now).toISOString());
     const delayed = await runner(config, check).runScheduled(now + 3_600_000);
     expect(delayed.checked).toHaveLength(3);
     const rows = await db.prepare("SELECT next_due_at FROM monitor_runtime").all<{ next_due_at: number }>();
     expect(rows.results.every(v => v.next_due_at > now + 3_600_000)).toBe(true);
   });
-  it("updates only due timestamps when public content is unchanged", async () => {
+  it("publishes check times without changing status timestamps or checkpointed history", async () => {
     const config = makeConfig({ monitors: [{ ...makeConfig().monitors[0], recovery_threshold: 1 }] });
     const check = vi.fn(async () => ({ ok: true }));
     await runner(config, check).runScheduled(now);
     const before = await runner(config, check).getSnapshot(now);
-    const savedBefore = await db.prepare("SELECT snapshot_json, history_json FROM public_snapshot").first();
+    const savedBefore = await db.prepare("SELECT history_json FROM public_snapshot").first();
     const second = await runner(config, check).runScheduled(now + 300_000);
     const after = await runner(config, check).getSnapshot(now + 300_000);
-    expect(after.site).toEqual(before.site); expect(second.usage.d1_writes).toBe(3);
+    expect(after.site).toEqual(before.site); expect(second.usage.d1_writes).toBe(4);
+    expect(before.components[0]?.last_checked_at).toBe(new Date(now).toISOString());
+    expect(after.components[0]?.last_checked_at).toBe(new Date(now + 300_000).toISOString());
     expect(after.components[0]?.history?.days.at(-1)?.known_ms).toBe(300_000);
-    expect(await db.prepare("SELECT snapshot_json, history_json FROM public_snapshot").first()).toEqual(savedBefore); // acquire, runtime row, release
+    expect(await db.prepare("SELECT history_json FROM public_snapshot").first()).toEqual(savedBefore);
     expect((await row())?.last_checked_at).toBe(now + 300_000);
+    const idle = await runner(config, check).runScheduled(now + 360_000);
+    expect(idle.usage.d1_writes).toBe(0);
+    expect((await runner(config, check).getSnapshot(now + 600_000)).components[0]?.last_checked_at).toBe(after.components[0]?.last_checked_at);
   });
   it("suppresses repeated notifications and emits one per actual component transition", async () => {
     const config = makeConfig({ notifications: { webhook: true }, monitors: [{ ...makeConfig().monitors[0], interval: "1m", failure_threshold: 2, recovery_threshold: 2 }] });
@@ -66,6 +72,10 @@ describe("D1 scheduler, domains, and notifications", () => {
     await runner(config, check, notify).runScheduled(now + 60_000); // unknown -> up
     ok = false;
     await runner(config, check, notify).runScheduled(now + 120_000); expect(notify).toHaveBeenCalledTimes(1);
+    const failedCheck = await runner(config, check, notify).getSnapshot(now + 120_000);
+    expect(failedCheck.components[0]?.status).toBe("operational");
+    expect(failedCheck.components[0]?.last_checked_at).toBe(new Date(now + 120_000).toISOString());
+    expect(failedCheck.site.updated_at).toBe(new Date(now + 60_000).toISOString());
     await runner(config, check, notify).runScheduled(now + 180_000); expect(notify).toHaveBeenCalledTimes(2);
     await runner(config, check, notify).runScheduled(now + 240_000); expect(notify).toHaveBeenCalledTimes(2);
     ok = true;
@@ -136,7 +146,7 @@ describe("D1 scheduler, domains, and notifications", () => {
     });
     const unchanged = await scheduled.runScheduled(now + 300_000);
     expect(unchanged.usage).toEqual({
-      d1_reads: 9, d1_writes: 3, subrequests: 13, notifications: 0, due_jobs: 1
+      d1_reads: 9, d1_writes: 4, subrequests: 14, notifications: 0, due_jobs: 1
     });
     ok = false;
     const transition = await scheduled.runScheduled(now + 600_000);

@@ -120,6 +120,14 @@ async function commitScheduledChanges(context: ScheduledContext, owner: string, 
   if (!sameContent(view.snapshot, projected.snapshot)) {
     changes.snapshot = projected.snapshot;
     if (config.notifications.webhook) changes.events = transitionEvents(view.snapshot, projected.snapshot);
+  } else if (projected.snapshot.components.some(component =>
+    component.last_checked_at !== view.snapshot?.components.find(previous => previous.id === component.id)?.last_checked_at
+  )) {
+    // Publish real check times without treating them as a status change or notification.
+    changes.snapshot = {
+      ...projected.snapshot,
+      site: { ...projected.snapshot.site, updated_at: view.snapshot!.site.updated_at }
+    };
   }
   if (historyNeedsUpdate(view.history, projected.snapshot.components, now, config.site.timezone)) {
     changes.history = advanceHistory(view.history, projected.snapshot.components, now, config.site.timezone);

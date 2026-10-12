@@ -61,12 +61,17 @@ export function project(
   maintenance: Maintenance[],
   now: number
 ): PublicSnapshot {
-  const monitorStates = new Map(states.map(state => [state.monitor_id, state.current_state]));
+  const monitorStates = new Map(states.map(state => [state.monitor_id, state]));
   const publicIncidents = incidents.map(projectIncident);
   const components = config.components.map(component => {
     const componentMonitorStates = config.monitors
       .filter(monitor => monitor.component === component.id)
-      .map(monitor => monitorStates.get(monitor.id) ?? "unknown");
+      .map(monitor => monitorStates.get(monitor.id));
+    const checkTimes = componentMonitorStates.map(state => state?.last_checked_at ?? null);
+    // A service is only as fresh as its oldest monitor; all must have been checked.
+    const lastCheckedAt = checkTimes.length && checkTimes.every(time => time !== null)
+      ? new Date(Math.min(...checkTimes as number[])).toISOString()
+      : null;
     const activeImpacts = publicIncidents
       .filter(incident => incident.status !== "resolved" && incident.components.includes(component.id))
       .map(incident => incident.impact);
@@ -74,7 +79,8 @@ export function project(
       id: component.id,
       name: component.name,
       ...(component.description ? { description: component.description } : {}),
-      status: worst([componentStatusFromMonitors(componentMonitorStates), ...activeImpacts])
+      status: worst([componentStatusFromMonitors(componentMonitorStates.map(state => state?.current_state ?? "unknown")), ...activeImpacts]),
+      last_checked_at: lastCheckedAt
     };
   });
   return {
@@ -116,6 +122,7 @@ const publicSchema = z.object({
     name: publicTextSchema,
     description: publicTextSchema.optional(),
     status: z.enum(publicStates),
+    last_checked_at: z.iso.datetime().nullable().optional(),
     history: publicHistorySchema.optional()
   }).strict()),
   incidents: z.array(incidentSchema),
@@ -146,7 +153,12 @@ export function assertPublic(snapshot: unknown, config: Config, secrets: string[
   }
 }
 export function sameContent(a: PublicSnapshot | null, b: PublicSnapshot): boolean {
-  return !!a && JSON.stringify({ ...a, site: { ...a.site, updated_at: "" } }) === JSON.stringify({ ...b, site: { ...b.site, updated_at: "" } });
+  const content = (snapshot: PublicSnapshot) => ({
+    ...snapshot,
+    site: { ...snapshot.site, updated_at: "" },
+    components: snapshot.components.map(({ last_checked_at, ...component }) => component)
+  });
+  return !!a && JSON.stringify(content(a)) === JSON.stringify(content(b));
 }
 export function transitionEvents(previous: PublicSnapshot | null, current: PublicSnapshot): NotificationEvent[] {
   if (!previous) return [];

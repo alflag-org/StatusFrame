@@ -21,12 +21,16 @@ export function createPageContext(snapshot: PublicSnapshot) {
     timeZone: snapshot.site.timezone
   });
   const timezone = formatter.resolvedOptions().timeZone;
+  const checkFormatter = new Intl.DateTimeFormat(language, {
+    dateStyle: "medium",
+    timeStyle: "medium",
+    timeZone: timezone
+  });
   const timezoneLabel = timezone === "Asia/Tokyo" ? "JST" : timezone;
   const localizedText = pageText[language];
   const text = {
     ...localizedText,
-    legend: `${localizedText.legend} · ${timezoneLabel}`,
-    date: language === "ja" ? `${localizedText.date}（${timezoneLabel}）` : `${localizedText.date} (${timezoneLabel})`
+    legend: `${localizedText.legend} · ${timezoneLabel}`
   };
 
   return {
@@ -35,6 +39,10 @@ export function createPageContext(snapshot: PublicSnapshot) {
     timezoneLabel,
     renderDate(value: string): string {
       const formatted = formatter.format(new Date(value));
+      return `<time datetime="${escapeHtml(value)}">${escapeHtml(formatted)} ${escapeHtml(timezoneLabel)}</time>`;
+    },
+    renderCheckDate(value: string): string {
+      const formatted = checkFormatter.format(new Date(value));
       return `<time datetime="${escapeHtml(value)}">${escapeHtml(formatted)} ${escapeHtml(timezoneLabel)}</time>`;
     },
     formatPercentage(value: number | null): string {

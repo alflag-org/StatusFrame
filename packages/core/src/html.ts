@@ -5,17 +5,14 @@ import { createPageContext, escapeHtml, type PageContext } from "./html/format";
 import { pageStyles } from "./html/styles";
 
 function renderStatusBanner(site: PublicSnapshot["site"], context: PageContext): string {
-  const { text, renderDate } = context;
+  const { text } = context;
   const icon = site.status === "operational"
     ? '<path d="m5 12 4 4L19 6"/>'
     : '<path d="M12 5v9m0 4h.01"/>';
 
   return `<section class="banner ${site.status}" id="status" aria-labelledby="status-title">
     <span class="banner-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></span>
-    <div>
-      <h1 id="status-title">${text.banner[site.status]}</h1>
-      <p>${text.updated}: ${renderDate(site.updated_at)}</p>
-    </div>
+    <h1 id="status-title">${text.banner[site.status]}</h1>
   </section>`;
 }
 
@@ -23,11 +20,12 @@ function renderServices(components: PublicSnapshot["components"], context: PageC
   const { text, renderStatusBadge } = context;
   const legend = (["operational", "degraded", "partial_outage", "major_outage", "unknown"] as const)
     .map(renderStatusBadge).join("");
+  const hasHistory = components.some(component => component.history?.days.some(day => day.known_ms > 0));
 
   return `<section class="section" id="services" aria-labelledby="services-title">
     <h2 id="services-title">${text.services}</h2>
     ${components.map(component => renderComponent(component, context)).join("")}
-    <div class="legend muted"><span>${text.legend}</span>${legend}</div>
+    ${hasHistory ? `<div class="legend muted"><span>${text.legend}</span>${legend}</div>` : ""}
   </section>`;
 }
 
@@ -74,7 +72,6 @@ export function renderStatusPage(snapshot: PublicSnapshot): string {
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="#status"><span class="brand-mark" aria-hidden="true"></span>${escapeHtml(site.name)}</a>
-      <nav aria-label="${text.subtitle}"><a href="#services">${text.services}</a><a href="#maintenance">${text.maintenance}</a><a href="#incidents">${text.incidents}</a></nav>
     </div>
   </header>
   <main class="container">

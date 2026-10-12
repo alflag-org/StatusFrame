@@ -49,6 +49,23 @@ describe("thresholds and public aggregation", () => {
     assertPublic(snapshot, config); expect(snapshot.site.status).toBe("degraded");
     expect(JSON.stringify(snapshot)).not.toContain("secret stack"); expect(JSON.stringify(snapshot)).not.toContain("website-check");
   });
+  it("reports the oldest check across a service's monitors and requires all to be checked", () => {
+    const config = makeConfig({ monitors: [
+      { ...makeConfig().monitors[0], id: "first-check" },
+      { ...makeConfig().monitors[0], id: "second-check" }
+    ] });
+    const states = config.monitors.map(monitor => initialState(monitor, "hash"));
+    states[0]!.last_checked_at = 60_000;
+    expect(project(config, states, [], [], 120_000).components[0]?.last_checked_at).toBeNull();
+    expect(project(config, states.slice(0, 1), [], [], 120_000).components[0]?.last_checked_at).toBeNull();
+    states[1]!.last_checked_at = 0;
+    const snapshot = project(config, states, [], [], 120_000);
+    expect(snapshot.components[0]?.last_checked_at).toBe("1970-01-01T00:00:00.000Z");
+    assertPublic(snapshot, config);
+    expect(project(makeConfig({ monitors: [] }), [], [], [], 120_000).components[0]?.last_checked_at).toBeNull();
+    snapshot.components[0]!.last_checked_at = "invalid";
+    expect(() => assertPublic(snapshot, config)).toThrow();
+  });
   it("rejects extra public keys and leaked operator prose", () => {
     const config = makeConfig(); const snapshot = project(config, [], [], [], 0);
     expect(() => assertPublic({ ...snapshot, monitor: {} }, config)).toThrow();
