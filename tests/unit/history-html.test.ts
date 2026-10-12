@@ -116,7 +116,8 @@ describe("status page", () => {
     expect(html).toContain("最終チェック: 未チェック");
     expect(html).not.toContain("日別履歴");
     expect(html).not.toContain("<table>");
-    expect(html).toContain("2026/01/02 8:00 JST");
+    expect(html).not.toContain("最終状態変更");
+    expect(html).not.toContain(new Date(now).toISOString());
     expect(html).not.toContain("UTC");
     expect(html).not.toContain("稼働率について");
     expect(html).not.toContain("<nav");
@@ -147,6 +148,7 @@ describe("status page", () => {
     }));
     const html = renderStatusPage(snapshot);
     const pastSection = html.indexOf('class="past-maintenance"');
+    expect(html).not.toContain(language === "ja" ? "最終状態変更" : "Last status change");
     expect(html.indexOf("scheduled &lt;&amp;&gt;")).toBeLessThan(pastSection);
     expect(html.indexOf("in_progress &lt;&amp;&gt;")).toBeLessThan(pastSection);
     expect(html.indexOf("completed &lt;&amp;&gt;")).toBeGreaterThan(pastSection);

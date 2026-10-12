@@ -5,17 +5,14 @@ import { createPageContext, escapeHtml, type PageContext } from "./html/format";
 import { pageStyles } from "./html/styles";
 
 function renderStatusBanner(site: PublicSnapshot["site"], context: PageContext): string {
-  const { text, renderDate } = context;
+  const { text } = context;
   const icon = site.status === "operational"
     ? '<path d="m5 12 4 4L19 6"/>'
     : '<path d="M12 5v9m0 4h.01"/>';
 
   return `<section class="banner ${site.status}" id="status" aria-labelledby="status-title">
     <span class="banner-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></span>
-    <div>
-      <h1 id="status-title">${text.banner[site.status]}</h1>
-      <p>${text.updated}: ${renderDate(site.updated_at)}</p>
-    </div>
+    <h1 id="status-title">${text.banner[site.status]}</h1>
   </section>`;
 }
 
